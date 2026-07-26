@@ -1,0 +1,30 @@
+# Secrets — never commit. NOTE the patterns: `.env` and `*.env` do NOT match a file like
+# `.env.save` (it ends in .save), which is exactly how a plaintext key copy gets committed.
+# So ignore every .env* variant and re-include ONLY the template.
+.env
+*.env
+.env.*
+!.env.example
+
+# Local data store (raw + scored conversations)
+*.duckdb
+*.duckdb.wal
+
+# Calibration working files — contain raw conversation transcripts (customer PII).
+# Ignore EVERY data format, not just .csv: the same sample also exists as a 208KB Apple
+# Numbers file (review_sample.numbers), which a `*.csv`-only rule would have committed.
+# Code in this folder (compare.py, sample_for_review.py) is re-included below.
+calibration/*
+!calibration/*.py
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

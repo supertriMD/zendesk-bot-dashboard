@@ -1,0 +1,8 @@
+# Pinned loosely but with lower bounds that support Python 3.9.
+# Recommend a virtualenv:  python3 -m venv .venv && source .venv/bin/activate
+streamlit>=1.32,<2
+duckdb>=0.10,<2
+anthropic>=0.39
+requests>=2.31,<3
+python-dotenv>=1.0,<2
+pandas>=2.0,<3
