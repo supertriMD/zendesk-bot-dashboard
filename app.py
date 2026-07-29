@@ -11,13 +11,40 @@ Run:  streamlit run app.py
 from __future__ import annotations
 
 import hmac
+import json
+import os
 import re
 
 import pandas as pd
 import streamlit as st
 
-import config
-import db
+
+def _bridge_secrets() -> None:
+    """Copy Streamlit Cloud secrets into env vars BEFORE config/db import them.
+    Lets the same code run locally (.env / ADC) and on Streamlit Cloud (secrets)
+    without any Streamlit dependency inside config.py / db.py."""
+    try:
+        secrets = st.secrets
+    except Exception:
+        return  # no secrets configured (local dev) — fall back to .env / ADC
+    for key in ("APP_PASSWORD", "BQ_PROJECT", "BQ_DATASET", "BQ_LOCATION",
+                "GCP_SERVICE_ACCOUNT_JSON"):
+        try:
+            if key in secrets and not os.environ.get(key):
+                os.environ[key] = str(secrets[key])
+        except Exception:
+            pass
+    try:
+        if "gcp_service_account" in secrets and not os.environ.get("GCP_SERVICE_ACCOUNT_JSON"):
+            os.environ["GCP_SERVICE_ACCOUNT_JSON"] = json.dumps(dict(secrets["gcp_service_account"]))
+    except Exception:
+        pass
+
+
+_bridge_secrets()
+
+import config  # noqa: E402  (after the secrets bridge on purpose)
+import db  # noqa: E402
 
 # The three "answerable" outcomes. 'no_question' is scored but excluded from the
 # resolution rate so non-questions (auto-replies, 'thanks', spam) don't distort it.

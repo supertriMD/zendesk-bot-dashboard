@@ -1,0 +1,3 @@
+# Pin the theme so the dashboard looks the same for every viewer on Streamlit Cloud.
+[theme]
+base = "light"

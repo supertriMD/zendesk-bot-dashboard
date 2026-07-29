@@ -15,6 +15,8 @@ Guarantees:
 """
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
 
@@ -75,9 +77,22 @@ _client: Optional[bigquery.Client] = None
 
 
 def client() -> bigquery.Client:
+    """BigQuery client. Credentials, in order:
+      1. GCP_SERVICE_ACCOUNT_JSON env var (raw JSON) — used on Streamlit Cloud,
+         where the key comes from st.secrets (see app.py's secrets bridge).
+      2. Otherwise Application Default Credentials / GOOGLE_APPLICATION_CREDENTIALS
+         (local dev, the daily job).
+    """
     global _client
     if _client is None:
-        _client = bigquery.Client(project=config.BQ_PROJECT, location=config.BQ_LOCATION)
+        creds_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+        if creds_json:
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_info(json.loads(creds_json))
+            _client = bigquery.Client(project=config.BQ_PROJECT,
+                                      location=config.BQ_LOCATION, credentials=creds)
+        else:
+            _client = bigquery.Client(project=config.BQ_PROJECT, location=config.BQ_LOCATION)
     return _client
 
 
