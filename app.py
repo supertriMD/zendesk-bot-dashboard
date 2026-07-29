@@ -23,8 +23,9 @@ import db
 # resolution rate so non-questions (auto-replies, 'thanks', spam) don't distort it.
 RESOLUTION_ORDER = ["resolved", "partial", "unresolved"]
 ANSWERABLE = RESOLUTION_ORDER
-# Zendesk statuses that count as "still open" (vs solved/closed).
-OPEN_STATUSES = ["new", "open", "pending", "hold"]
+# Open ticket statuses, split by whether an agent has engaged yet.
+AWAITING_STATUSES = ["new"]                  # created, no agent has worked it
+OPEN_STATUSES = ["open", "pending", "hold"]  # actively in progress
 # channel value -> display name
 CHANNEL_NAMES = {"email": "Email", "messaging": "Chat", "web": "Web Form"}
 CHANNEL_ORDER = ["Email", "Chat", "Web Form"]
@@ -54,14 +55,15 @@ def load_all() -> pd.DataFrame:
 
 
 def weekly_channel_table(df_all: pd.DataFrame) -> pd.DataFrame:
-    """Per week × channel: came in / bot handled / to human / still open."""
+    """Per week × channel: came in / bot handled / to human / awaiting agent / open."""
     g = df_all.groupby(["week", "channel_name"]).agg(
         came_in=("conversation_id", "size"),
         bot_handled=("bot_participated", "sum"),
         to_human=("ended_with_human", "sum"),
-        still_open=("status", lambda s: s.isin(OPEN_STATUSES).sum()),
+        awaiting=("status", lambda s: s.isin(AWAITING_STATUSES).sum()),
+        open_now=("status", lambda s: s.isin(OPEN_STATUSES).sum()),
     ).reset_index()
-    for col in ("came_in", "bot_handled", "to_human", "still_open"):
+    for col in ("came_in", "bot_handled", "to_human", "awaiting", "open_now"):
         g[col] = g[col].astype(int)
     return g
 
@@ -187,21 +189,26 @@ else:
         block = wk[wk["week"] == wstart].copy()
         block["channel_name"] = pd.Categorical(block["channel_name"], CHANNEL_ORDER, ordered=True)
         block = block.sort_values("channel_name")
-        t = block[["came_in", "bot_handled", "to_human", "still_open"]].sum()
+        t = block[["came_in", "bot_handled", "to_human", "awaiting", "open_now"]].sum()
         st.markdown(
             f"**Week of {pd.to_datetime(wstart).strftime('%d %b %Y')}** — "
             f"{int(t['came_in'])} in · {int(t['bot_handled'])} bot-handled · "
-            f"{int(t['to_human'])} to a human · {int(t['still_open'])} still open"
+            f"{int(t['to_human'])} to a human · {int(t['awaiting'])} awaiting agent · "
+            f"{int(t['open_now'])} open"
         )
-        show = (block.set_index("channel_name")[["came_in", "bot_handled", "to_human", "still_open"]]
+        show = (block.set_index("channel_name")[["came_in", "bot_handled", "to_human",
+                                                  "awaiting", "open_now"]]
                      .rename(columns={"came_in": "Came in", "bot_handled": "Bot handled",
-                                      "to_human": "→ To human", "still_open": "Still open"}))
+                                      "to_human": "→ To human", "awaiting": "Awaiting agent",
+                                      "open_now": "Open"}))
         show.index.name = "Channel"
         st.dataframe(show, use_container_width=True)
     st.caption(
         "**Bot handled** ≈ **Came in** on Email & Chat (the bot touches every one); "
         "**Web Form** is an agent-only channel, so its bot-handled is 0 and all of it goes "
-        "to a human. **Still open** = Zendesk status new/open/pending/hold (not solved/closed)."
+        "to a human. **Awaiting agent** = Zendesk status *new* (created, no agent has worked "
+        "it yet). **Open** = *open / pending / hold* (a person is actively on it). "
+        "Solved & closed tickets are excluded from both."
     )
 
 if df.empty:
