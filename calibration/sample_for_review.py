@@ -72,7 +72,8 @@ def main() -> None:
 
     print(f"Wrote {n} conversations to {OUTPUT_PATH}")
     print(f"\nFill in the `human_label` column with one of: {VALID_LABELS}")
-    print("Judge yourself whether the BOT resolved it (a human agent answering = not resolved).")
+    print("Judge whether the BOT answered the question. A handoff AFTER a real answer is "
+          "resolved/partial; 'unresolved' is only when the bot didn't answer.")
     print("Leave rows blank to skip them. Then run: python calibration/compare.py")
 
 

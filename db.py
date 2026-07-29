@@ -46,6 +46,15 @@ SCORE_COLUMNS: List[str] = [
 ]
 
 
+RESOLUTION_PATH_COLUMNS: List[str] = [
+    "conversation_id",
+    "resolution_path",
+    "path_reason",
+    "classified_at",
+    "model",
+]
+
+
 def _now() -> datetime:
     """UTC timestamp for *_at columns. Kept in one place for consistency."""
     return datetime.now(timezone.utc)
@@ -156,6 +165,52 @@ def conversations_to_score(rescore: bool = False, limit: Optional[int] = None) -
         return con.execute(sql).fetch_df()
 
 
+def upsert_resolution_paths(rows: Iterable[Dict]) -> int:
+    """Insert/update backlog resolution-path classifications. Idempotent on conversation_id."""
+    with contextlib.closing(get_connection()) as con:
+        return _upsert(con, "resolution_paths", RESOLUTION_PATH_COLUMNS, rows)
+
+
+def backlog_to_classify(reclassify: bool = False, limit: Optional[int] = None) -> pd.DataFrame:
+    """Backlog conversations (partial/unresolved bot conversations) needing a path tag.
+
+    By default returns only those not yet classified; reclassify=True returns all backlog.
+    """
+    base = (
+        "SELECT c.conversation_id, c.channel, c.full_text, s.resolution, s.primary_topic "
+        "FROM conversations c JOIN scores s USING (conversation_id) "
+        "WHERE c.bot_participated AND s.resolution IN ('partial','unresolved')"
+    )
+    if reclassify:
+        sql = base + " ORDER BY c.updated_at"
+    else:
+        sql = (
+            base.replace("FROM conversations c JOIN scores s USING (conversation_id)",
+                         "FROM conversations c JOIN scores s USING (conversation_id) "
+                         "LEFT JOIN resolution_paths r USING (conversation_id)")
+            + " AND r.conversation_id IS NULL ORDER BY c.updated_at"
+        )
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+    with contextlib.closing(get_connection(read_only=True)) as con:
+        return con.execute(sql).fetch_df()
+
+
+def sample_by_path(path: str, limit: int = 25) -> pd.DataFrame:
+    """Random sample of backlog conversations classified with a given resolution_path.
+    Used to validate a bucket (e.g. 'human') by eyeball."""
+    sql = (
+        "SELECT r.conversation_id, c.channel, s.primary_topic, r.path_reason, c.full_text "
+        "FROM resolution_paths r "
+        "JOIN conversations c USING (conversation_id) "
+        "JOIN scores s USING (conversation_id) "
+        "WHERE r.resolution_path = ? "
+        "ORDER BY random() LIMIT ?"
+    )
+    with contextlib.closing(get_connection(read_only=True)) as con:
+        return con.execute(sql, [path, int(limit)]).fetch_df()
+
+
 def bot_conversations(limit: Optional[int] = None) -> pd.DataFrame:
     """All bot conversations (raw, no score needed). For pre-scoring hand-labelling."""
     sql = "SELECT * FROM conversations WHERE bot_participated ORDER BY updated_at"
@@ -178,8 +233,9 @@ def scored_conversations(
         "SELECT c.conversation_id, c.channel, c.created_at, c.subject, "
         "       c.full_text, c.turn_count, c.ended_with_human, c.user_rating, "
         "       s.resolution, s.confidence, s.primary_topic, s.unanswered_reason, "
-        "       s.scored_at, s.model "
+        "       s.scored_at, s.model, r.resolution_path "
         "FROM conversations c JOIN scores s USING (conversation_id) "
+        "LEFT JOIN resolution_paths r USING (conversation_id) "
         "WHERE c.bot_participated"
     )
     params: list = []

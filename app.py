@@ -59,6 +59,22 @@ def resolution_rate(df: pd.DataFrame) -> float:
     return (a["resolution"] == "resolved").mean()
 
 
+def containment_rate(df: pd.DataFrame) -> float:
+    """Share closed WITHOUT a human replying — the 'reduced human workload' metric."""
+    if df.empty:
+        return 0.0
+    return (~df["ended_with_human"]).mean()
+
+
+def contained_answered_share(df: pd.DataFrame) -> float:
+    """Of contained conversations, the share the bot actually answered (resolved/partial).
+    Distinguishes a real containment win from a contained-but-unanswered drop-off."""
+    contained = answerable(df[~df["ended_with_human"]])
+    if contained.empty:
+        return 0.0
+    return contained["resolution"].isin(["resolved", "partial"]).mean()
+
+
 # --- Page ----------------------------------------------------------------------
 st.set_page_config(page_title="Zendesk Bot Performance", page_icon="🤖", layout="wide")
 st.title("🤖 Zendesk Bot Performance")
@@ -102,33 +118,60 @@ if df.empty:
     st.stop()
 
 # --- Headline ------------------------------------------------------------------
-st.subheader("Estimated resolution rate")
-c1, c2, c3, c4 = st.columns(4)
-ans = answerable(df)
-n_excluded = len(df) - len(ans)
-email_df, web_df = ans[ans["surface"] == "Email"], ans[ans["surface"] == "Website"]
-c1.metric("Estimated resolution rate", f"{resolution_rate(df):.0%}",
-          help="Share of answerable bot conversations the judge rated 'resolved'. Estimated — not calibrated.")
-c2.metric("Answerable conversations", f"{len(ans):,}")
-c3.metric("Email", f"{resolution_rate(email_df):.0%}" if len(email_df) else "—",
-          help=f"{len(email_df)} email conversations")
-c4.metric("Website", f"{resolution_rate(web_df):.0%}" if len(web_df) else "—",
-          help=f"{len(web_df)} web/messaging conversations")
+# Email is the only channel we can measure a true resolution rate for: every
+# email becomes a ticket. Web chat only creates a ticket when it ESCALATES, so
+# our web-chat rows are the escalated subset only — shown as a gap feed (a count),
+# never as a resolution rate.
+email_all = df[df["surface"] == "Email"]
+email_ans = answerable(email_all)
+webchat_all = df[df["surface"] == "Website"]
+n_excluded = len(email_all) - len(email_ans)
 
-# Three-way breakdown (excludes no_question)
-breakdown = (ans["resolution"].value_counts().reindex(RESOLUTION_ORDER, fill_value=0))
-excluded_note = (f"  ·  {n_excluded} excluded as non-questions"
-                 if n_excluded else "")
+# Containment is the headline — it matches the bot's goal (reduce human workload).
+st.subheader("Work handled without a human (containment)")
+cc = st.columns(4)
+cc[0].metric("Email — no human needed", f"{containment_rate(email_all):.0%}",
+             help="Share of email bot conversations closed without any human agent "
+                  "replying. This is the 'reduced workload' metric.")
+cc[1].metric("↳ of those, bot answered", f"{contained_answered_share(email_all):.0%}",
+             help="Quality of that containment: of the contained emails, the share where "
+                  "the bot gave a real answer (resolved or partial). The rest are "
+                  "contained-but-unanswered — possible drop-offs to watch.")
+cc[2].metric("Web chat — no human needed", f"{containment_rate(webchat_all):.0%}",
+             help="FLOOR only — bot-resolved chats never create a Zendesk ticket, so the "
+                  "true web-chat containment is higher than this.")
+cc[3].metric("↳ of those, bot answered", f"{contained_answered_share(webchat_all):.0%}")
+
+n_e_cont = int((~email_all["ended_with_human"]).sum())
+n_w_cont = int((~webchat_all["ended_with_human"]).sum())
 st.caption(
-    f"Breakdown — resolved: {breakdown['resolved']}, "
-    f"partial: {breakdown['partial']}, unresolved: {breakdown['unresolved']}"
-    f"{excluded_note}"
+    f"Email: {n_e_cont} of {len(email_all)} closed without a human. "
+    f"Web chat: {n_w_cont} of {len(webchat_all)} — escalated tickets only, so a floor "
+    "(bot-resolved chats aren't in ticket data). Measuring true web-chat containment "
+    "needs the messaging-layer source."
 )
 
-# --- Trend over time -----------------------------------------------------------
-st.subheader("Resolution rate over time")
+# Answer quality — estimated resolution (email is the unbiased channel).
+st.subheader("Answer quality — estimated resolution (email)")
+c1, c2, c3 = st.columns(3)
+c1.metric("Estimated resolution rate (email)", f"{resolution_rate(email_all):.0%}",
+          help="Of answerable email conversations, the share the judge rated fully "
+               "'resolved'. Estimated by the LLM judge, not calibrated.")
+c2.metric("Email conversations", f"{len(email_ans):,}")
+c3.metric("Web chat escalations", f"{len(webchat_all):,}",
+          help="Escalated web-chat conversations — a content-gap feed, not a resolution rate.")
+
+breakdown = (email_ans["resolution"].value_counts().reindex(RESOLUTION_ORDER, fill_value=0))
+excluded_note = f"  ·  {n_excluded} excluded as non-questions" if n_excluded else ""
+st.caption(
+    f"Email breakdown — resolved: {breakdown['resolved']}, "
+    f"partial: {breakdown['partial']}, unresolved: {breakdown['unresolved']}{excluded_note}"
+)
+
+# --- Trend over time (email) ---------------------------------------------------
+st.subheader("Email resolution rate over time")
 weekly = (
-    df.assign(week=df["created_at"].dt.to_period("W").dt.start_time)
+    email_all.assign(week=email_all["created_at"].dt.to_period("W").dt.start_time)
       .groupby("week")
       .apply(lambda g: pd.Series({
           "Estimated resolution rate": resolution_rate(g),
@@ -139,6 +182,39 @@ if len(weekly) >= 2:
     st.line_chart(weekly["Estimated resolution rate"])
 else:
     st.caption("Not enough history yet for a trend (need at least two weeks).")
+
+# --- How the backlog gets solved (resolution path) ----------------------------
+paths = df[df["resolution_path"].notna()]
+if not paths.empty:
+    st.subheader("How the backlog gets solved")
+    total_p = len(paths)
+    counts_p = paths["resolution_path"].value_counts()
+    labels_p = {"active_lookup": "ACTIVE lookup", "content": "Content / KB", "human": "Needs a human"}
+    pc = st.columns(3)
+    for col, key in zip(pc, ["active_lookup", "content", "human"]):
+        n = int(counts_p.get(key, 0))
+        col.metric(labels_p[key], f"{n}",
+                   help=f"{n/total_p:.0%} of the {total_p} classified backlog conversations. "
+                        + {"active_lookup": "An integration reading the athlete's ACTIVE record would resolve it.",
+                           "content": "A KB article or pointer would resolve it — no per-athlete lookup.",
+                           "human": "Genuinely needs a person (exception, judgement call)."}[key])
+
+    def _top_path(path: str, k: int = 6) -> pd.DataFrame:
+        t = paths[paths["resolution_path"] == path]["primary_topic"].value_counts().head(k)
+        return t.rename_axis("theme").reset_index(name="conversations")
+
+    lc, rc = st.columns(2)
+    with lc:
+        st.markdown("**What an ACTIVE integration would resolve**")
+        st.dataframe(_top_path("active_lookup"), use_container_width=True, hide_index=True)
+    with rc:
+        st.markdown("**What content / KB would resolve**")
+        st.dataframe(_top_path("content"), use_container_width=True, hide_index=True)
+    st.caption(
+        "Each partial/unresolved conversation classified by how it should be solved. "
+        "**Estimated by the LLM classifier, not calibrated — the 'human' bucket is pending "
+        "owner validation** (`calibration/validate_human_bucket.py`)."
+    )
 
 # --- Top 5 unanswered themes ---------------------------------------------------
 st.subheader("Top 5 things the bot couldn't answer")

@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS themes (
     model             VARCHAR
 );
 
+-- Resolution-path classification of backlog conversations (how each should be solved).
+-- Separate from `scores` so re-scoring never wipes these tags. One row per conversation.
+CREATE TABLE IF NOT EXISTS resolution_paths (
+    conversation_id   VARCHAR PRIMARY KEY,
+    resolution_path   VARCHAR,   -- 'active_lookup' | 'content' | 'human'
+    path_reason       VARCHAR,   -- one line on why
+    classified_at     TIMESTAMP,
+    model             VARCHAR
+);
+
 -- Small key/value table for job state (incremental pull high-water marks, etc.).
 -- Keeps pulls idempotent and re-runnable without re-reading everything.
 CREATE TABLE IF NOT EXISTS pull_state (
