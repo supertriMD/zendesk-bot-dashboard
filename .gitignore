@@ -1,3 +1,8 @@
+# GCP service-account keys — never commit (keep the real key OUTSIDE this repo).
+*-key.json
+*service-account*.json
+*credentials*.json
+
 # Secrets — never commit. NOTE the patterns: `.env` and `*.env` do NOT match a file like
 # `.env.save` (it ends in .save), which is exactly how a plaintext key copy gets committed.
 # So ignore every .env* variant and re-include ONLY the template.

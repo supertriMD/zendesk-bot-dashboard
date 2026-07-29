@@ -16,10 +16,14 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-# --- Storage -------------------------------------------------------------------
-# Single local DuckDB file. Swapping to BigQuery later is isolated to db.py.
-DB_PATH = PROJECT_ROOT / os.environ.get("DB_FILENAME", "zendesk_dashboard.duckdb")
-SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
+# --- Storage (BigQuery) --------------------------------------------------------
+# The data store is BigQuery. All access is behind db.py. Authentication uses the
+# standard GOOGLE_APPLICATION_CREDENTIALS env var (path to a service-account key
+# JSON) — the google-cloud-bigquery client reads it automatically; we never handle
+# the key contents here.
+BQ_PROJECT = os.environ.get("BQ_PROJECT", "supertri-reg-analytics")
+BQ_DATASET = os.environ.get("BQ_DATASET", "zendesk_bot")
+BQ_LOCATION = os.environ.get("BQ_LOCATION", "EU")  # must match the analytics datasets
 
 # --- LLM judge -----------------------------------------------------------------
 # Model is config, not code, so switching (e.g. Opus -> Sonnet for bulk) is one line.

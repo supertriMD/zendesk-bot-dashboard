@@ -1,8 +1,10 @@
-# Pinned loosely but with lower bounds that support Python 3.9.
 # Recommend a virtualenv:  python3 -m venv .venv && source .venv/bin/activate
 streamlit>=1.32,<2
-duckdb>=0.10,<2
+google-cloud-bigquery>=3.20
+db-dtypes>=1.2        # lets BigQuery results convert to pandas DataFrames
+pyarrow>=14
 anthropic>=0.39
 requests>=2.31,<3
 python-dotenv>=1.0,<2
 pandas>=2.0,<3
+# duckdb is only needed for the one-off migrate_duckdb_to_bq.py (pip install duckdb).
