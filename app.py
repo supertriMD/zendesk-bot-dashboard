@@ -325,28 +325,35 @@ gaps = df[df["resolution"].isin(["unresolved", "partial"])].copy()
 if gaps.empty:
     st.success("No unresolved or partial conversations in this range.")
 else:
-    themes = (
-        gaps.groupby("primary_topic")
-        .agg(count=("conversation_id", "size"),
-             example=("full_text", lambda s: first_user_question(s.iloc[0])))
-        .sort_values("count", ascending=False)
-        .head(5)
-        .reset_index()
-        .rename(columns={"primary_topic": "theme", "example": "example question"})
-    )
+    counts = gaps.groupby("primary_topic").size().sort_values(ascending=False)
+    top = counts.head(5)
+    # One example question per top theme — fetch only those ~5 transcripts.
+    example_id = {t: gaps[gaps["primary_topic"] == t]["conversation_id"].iloc[0] for t in top.index}
+    ex_tx = db.transcripts_for(example_id.values())
+    ex_map = dict(zip(ex_tx["conversation_id"].astype(str), ex_tx["full_text"]))
+    themes = pd.DataFrame({
+        "theme": top.index,
+        "conversations": top.values,
+        "example question": [first_user_question(ex_map.get(str(example_id[t]), "")) for t in top.index],
+    })
     st.dataframe(themes, use_container_width=True, hide_index=True)
 
-    # --- Drill-down ------------------------------------------------------------
+    # --- Drill-down (transcripts fetched only for the selected theme) -----------
     st.subheader("Drill into a theme")
-    choice = st.selectbox("Theme", themes["theme"].tolist())
-    detail = gaps[gaps["primary_topic"] == choice]
-    st.caption(f"{len(detail)} conversation(s) tagged '{choice}'")
+    choice = st.selectbox("Theme", list(top.index))
+    detail = gaps[gaps["primary_topic"] == choice].head(50)
+    tx = db.transcripts_for(detail["conversation_id"].tolist())
+    tx_map = dict(zip(tx["conversation_id"].astype(str), tx["full_text"]))
+    total_in_theme = int(counts[choice])
+    st.caption(f"{total_in_theme} conversation(s) tagged '{choice}'"
+               + (" (showing first 50)" if total_in_theme > 50 else ""))
     for row in detail.itertuples():
         label = f"{row.conversation_id} · {row.surface} · {row.resolution}"
         with st.expander(label):
             if row.unanswered_reason:
                 st.markdown(f"**Why unresolved:** {row.unanswered_reason}")
-            st.text(re.sub(r"\n{3,}", "\n\n", (row.full_text or "").strip())[:6000])
+            body = (tx_map.get(str(row.conversation_id), "") or "").strip()
+            st.text(re.sub(r"\n{3,}", "\n\n", body)[:6000])
 
 st.divider()
 st.caption(

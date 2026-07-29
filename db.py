@@ -220,8 +220,10 @@ def conversations_to_score(rescore: bool = False, limit: Optional[int] = None) -
 
 def scored_conversations(start: Optional[str] = None, end: Optional[str] = None) -> pd.DataFrame:
     """Bot conversations that have a score, joined with score + resolution_path."""
+    # Deliberately NOT selecting full_text here — transcripts are large and the
+    # aggregate views don't need them. Fetch them on demand via transcripts_for().
     sql = (
-        "SELECT c.conversation_id, c.channel, c.created_at, c.subject, c.full_text, "
+        "SELECT c.conversation_id, c.channel, c.created_at, c.subject, "
         "       c.turn_count, c.ended_with_human, c.user_rating, "
         "       s.resolution, s.confidence, s.primary_topic, s.unanswered_reason, "
         "       s.scored_at, s.model, r.resolution_path "
@@ -238,6 +240,18 @@ def scored_conversations(start: Optional[str] = None, end: Optional[str] = None)
         params["end"] = end
     sql += " ORDER BY c.created_at"
     return query_df(sql, params or None)
+
+
+def transcripts_for(ids: Iterable[str]) -> pd.DataFrame:
+    """Fetch full_text for specific conversation ids (drill-down / examples only)."""
+    ids = [str(i) for i in ids]
+    if not ids:
+        return pd.DataFrame(columns=["conversation_id", "full_text"])
+    sql = (f"SELECT conversation_id, full_text FROM {_tbl('conversations')} "
+           "WHERE conversation_id IN UNNEST(@ids)")
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ArrayQueryParameter("ids", "STRING", ids)])
+    return client().query(sql, job_config=job_config).to_dataframe()
 
 
 def all_conversations() -> pd.DataFrame:
