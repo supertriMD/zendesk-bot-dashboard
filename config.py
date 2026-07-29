@@ -21,9 +21,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 # standard GOOGLE_APPLICATION_CREDENTIALS env var (path to a service-account key
 # JSON) — the google-cloud-bigquery client reads it automatically; we never handle
 # the key contents here.
-BQ_PROJECT = os.environ.get("BQ_PROJECT", "supertri-reg-analytics")
+BQ_PROJECT = os.environ.get("BQ_PROJECT", "supertri-chat-bot")
 BQ_DATASET = os.environ.get("BQ_DATASET", "zendesk_bot")
-BQ_LOCATION = os.environ.get("BQ_LOCATION", "EU")  # must match the analytics datasets
+BQ_LOCATION = os.environ.get("BQ_LOCATION", "EU")
 
 # --- LLM judge -----------------------------------------------------------------
 # Model is config, not code, so switching (e.g. Opus -> Sonnet for bulk) is one line.
