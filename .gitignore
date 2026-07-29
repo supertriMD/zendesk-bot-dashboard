@@ -10,6 +10,9 @@
 *.duckdb
 *.duckdb.wal
 
+# Scheduled-job logs (may echo conversation snippets)
+logs/
+
 # Calibration working files — contain raw conversation transcripts (customer PII).
 # Ignore EVERY data format, not just .csv: the same sample also exists as a 208KB Apple
 # Numbers file (review_sample.numbers), which a `*.csv`-only rule would have committed.

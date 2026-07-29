@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent: runs run_daily.sh once a day at 06:30 local time.
+
+  Install (once):
+    cp deploy/com.supertri.zendeskbot.daily.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.supertri.zendeskbot.daily.plist
+
+  Check / stop:
+    launchctl list | grep zendeskbot
+    launchctl unload ~/Library/LaunchAgents/com.supertri.zendeskbot.daily.plist
+
+  Note: launchd only fires while you are logged in. If the Mac is asleep at 06:30,
+  the job runs at the next wake. For always-on scheduling, move this to Cloud Run
+  (like the analytics courier) once the BigQuery swap is done.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.supertri.zendeskbot.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/michaeldhulst/dev/zendesk-bot-dashboard/run_daily.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/michaeldhulst/dev/zendesk-bot-dashboard</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/michaeldhulst/dev/zendesk-bot-dashboard/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/michaeldhulst/dev/zendesk-bot-dashboard/logs/launchd.err.log</string>
+</dict>
+</plist>

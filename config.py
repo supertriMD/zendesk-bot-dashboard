@@ -38,6 +38,12 @@ HISTORY_DAYS = int(os.environ.get("HISTORY_DAYS", "90"))
 ZENDESK_PAGE_SIZE = int(os.environ.get("ZENDESK_PAGE_SIZE", "100"))
 ZENDESK_MAX_RETRIES = int(os.environ.get("ZENDESK_MAX_RETRIES", "5"))
 
+# --- Dashboard ------------------------------------------------------------------
+# Single shared password gating the Streamlit dashboard. Read from the environment
+# (never hardcoded). If unset, the dashboard refuses to render rather than exposing
+# data unprotected.
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+
 # --- Calibration ---------------------------------------------------------------
 CALIBRATION_SAMPLE_SIZE = int(os.environ.get("CALIBRATION_SAMPLE_SIZE", "50"))
 # Agreement % below which we do NOT quote the headline resolution rate to anyone.

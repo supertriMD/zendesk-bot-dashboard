@@ -10,6 +10,7 @@ Run:  streamlit run app.py
 """
 from __future__ import annotations
 
+import hmac
 import re
 
 import pandas as pd
@@ -59,6 +60,33 @@ def resolution_rate(df: pd.DataFrame) -> float:
     return (a["resolution"] == "resolved").mean()
 
 
+def require_password() -> None:
+    """Gate the dashboard behind a single shared password (config.APP_PASSWORD).
+
+    Basic protection for an internal ops tool — not a full auth system. If no
+    password is configured, refuse to render rather than exposing data unprotected.
+    """
+    if not config.APP_PASSWORD:
+        st.error(
+            "Dashboard is not protected: `APP_PASSWORD` is not set. "
+            "Set it in `.env` (or the deploy environment) before serving this."
+        )
+        st.stop()
+    if st.session_state.get("auth_ok"):
+        return
+    with st.form("login"):
+        st.markdown("#### 🔒 Enter password")
+        pw = st.text_input("Password", type="password", label_visibility="collapsed")
+        submitted = st.form_submit_button("Enter")
+    if submitted:
+        if hmac.compare_digest(pw, config.APP_PASSWORD):
+            st.session_state["auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+
 def containment_rate(df: pd.DataFrame) -> float:
     """Share closed WITHOUT a human replying — the 'reduced human workload' metric."""
     if df.empty:
@@ -77,6 +105,7 @@ def contained_answered_share(df: pd.DataFrame) -> float:
 
 # --- Page ----------------------------------------------------------------------
 st.set_page_config(page_title="Zendesk Bot Performance", page_icon="🤖", layout="wide")
+require_password()  # gate everything below behind the shared password
 st.title("🤖 Zendesk Bot Performance")
 
 st.warning(
