@@ -27,6 +27,7 @@ CONVERSATION_COLUMNS: List[str] = [
     "created_at",
     "updated_at",
     "subject",
+    "status",
     "full_text",
     "turn_count",
     "bot_participated",
@@ -75,6 +76,8 @@ def init_db() -> None:
     schema_sql = config.SCHEMA_PATH.read_text()
     with contextlib.closing(get_connection()) as con:
         con.execute(schema_sql)
+        # Migration for stores created before `status` existed (adds it, keeps data).
+        con.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS status VARCHAR")
 
 
 def _upsert(con, table: str, columns: List[str], rows: Iterable[Dict]) -> int:
@@ -194,6 +197,31 @@ def backlog_to_classify(reclassify: bool = False, limit: Optional[int] = None) -
         sql += f" LIMIT {int(limit)}"
     with contextlib.closing(get_connection(read_only=True)) as con:
         return con.execute(sql).fetch_df()
+
+
+def all_conversations() -> pd.DataFrame:
+    """Every conversation (all channels incl. web-form), for the weekly channel view.
+    Unlike scored_conversations this is NOT limited to bot conversations."""
+    sql = (
+        "SELECT conversation_id, channel, created_at, status, "
+        "       bot_participated, ended_with_human "
+        "FROM conversations"
+    )
+    with contextlib.closing(get_connection(read_only=True)) as con:
+        return con.execute(sql).fetch_df()
+
+
+def update_statuses(pairs: Iterable[Dict]) -> int:
+    """Backfill/refresh only the `status` column. pairs: [{conversation_id, status}, ...]."""
+    pairs = list(pairs)
+    if not pairs:
+        return 0
+    with contextlib.closing(get_connection()) as con:
+        con.executemany(
+            "UPDATE conversations SET status = ? WHERE conversation_id = ?",
+            [[p.get("status"), p["conversation_id"]] for p in pairs],
+        )
+    return len(pairs)
 
 
 def sample_by_path(path: str, limit: int = 25) -> pd.DataFrame:

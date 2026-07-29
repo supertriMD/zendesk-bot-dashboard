@@ -232,6 +232,7 @@ def assemble_row(
         "created_at": ticket.get("created_at"),
         "updated_at": ticket.get("updated_at"),
         "subject": ticket.get("subject"),
+        "status": ticket.get("status"),
         "full_text": full_text,
         "turn_count": turn_count,
         "bot_participated": bot_participated,

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at        TIMESTAMP,
     updated_at        TIMESTAMP,             -- used as the incremental high-water mark
     subject           VARCHAR,
+    status            VARCHAR,               -- Zendesk ticket status: new/open/pending/hold/solved/closed
     full_text         VARCHAR,               -- concatenated turns, role-labelled (User:/Bot:/Agent:)
     turn_count        INTEGER,
     bot_participated  BOOLEAN,               -- did the bot (Tri, author -1) actually take part

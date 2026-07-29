@@ -23,6 +23,11 @@ import db
 # resolution rate so non-questions (auto-replies, 'thanks', spam) don't distort it.
 RESOLUTION_ORDER = ["resolved", "partial", "unresolved"]
 ANSWERABLE = RESOLUTION_ORDER
+# Zendesk statuses that count as "still open" (vs solved/closed).
+OPEN_STATUSES = ["new", "open", "pending", "hold"]
+# channel value -> display name
+CHANNEL_NAMES = {"email": "Email", "messaging": "Chat", "web": "Web Form"}
+CHANNEL_ORDER = ["Email", "Chat", "Web Form"]
 
 
 # --- Data ----------------------------------------------------------------------
@@ -35,6 +40,30 @@ def load_data() -> pd.DataFrame:
         # widget are both "website"; email tickets are "email".
         df["surface"] = df["channel"].map(lambda c: "Email" if c == "email" else "Website")
     return df
+
+
+@st.cache_data(ttl=120)
+def load_all() -> pd.DataFrame:
+    """All conversations (incl. web-form) for the weekly channel view."""
+    df = db.all_conversations()
+    if not df.empty:
+        df["created_at"] = pd.to_datetime(df["created_at"])
+        df["week"] = df["created_at"].dt.to_period("W").dt.start_time.dt.date
+        df["channel_name"] = df["channel"].map(lambda c: CHANNEL_NAMES.get(c, c))
+    return df
+
+
+def weekly_channel_table(df_all: pd.DataFrame) -> pd.DataFrame:
+    """Per week × channel: came in / bot handled / to human / still open."""
+    g = df_all.groupby(["week", "channel_name"]).agg(
+        came_in=("conversation_id", "size"),
+        bot_handled=("bot_participated", "sum"),
+        to_human=("ended_with_human", "sum"),
+        still_open=("status", lambda s: s.isin(OPEN_STATUSES).sum()),
+    ).reset_index()
+    for col in ("came_in", "bot_handled", "to_human", "still_open"):
+        g[col] = g[col].astype(int)
+    return g
 
 
 def first_user_question(full_text: str) -> str:
@@ -115,36 +144,72 @@ st.warning(
 )
 
 data = load_data()
+data_all = load_all()
 
-if data.empty:
+if data_all.empty:
     st.info(
-        "No scored conversations yet.\n\n"
-        "Run the pipeline first: `python pull_conversations.py` then "
-        "`python score_conversations.py`. This dashboard will populate once "
-        "scores exist."
+        "No conversations yet.\n\n"
+        "Run the pipeline first: `python pull_conversations.py` "
+        "(then `python score_conversations.py`)."
     )
     st.stop()
 
 # --- Filters -------------------------------------------------------------------
-min_d, max_d = data["created_at"].min().date(), data["created_at"].max().date()
+min_d = data_all["created_at"].min().date()
+max_d = data_all["created_at"].max().date()
 with st.sidebar:
     st.header("Filters")
     date_range = st.date_input(
         "Conversation date range", value=(min_d, max_d),
         min_value=min_d, max_value=max_d,
     )
-    st.caption(f"Judge model: `{data['model'].iloc[0]}`")
+    st.caption(f"Judge model: `{data['model'].iloc[0] if not data.empty else '—'}`")
 
 if isinstance(date_range, tuple) and len(date_range) == 2:
     start, end = date_range
-    mask = (data["created_at"].dt.date >= start) & (data["created_at"].dt.date <= end)
-    df = data[mask].copy()
 else:
-    df = data.copy()
+    start, end = min_d, max_d
+
+df_all = data_all[(data_all["created_at"].dt.date >= start)
+                  & (data_all["created_at"].dt.date <= end)].copy()
+df = (data[(data["created_at"].dt.date >= start) & (data["created_at"].dt.date <= end)].copy()
+      if not data.empty else data)
+
+# --- Weekly performance by channel (main view) ---------------------------------
+st.subheader("Weekly performance by channel")
+st.caption("Questions in → handled by the bot → of those, escalated to a human → still open. "
+           "Most recent week first.")
+wk = weekly_channel_table(df_all)
+if wk.empty:
+    st.info("No conversations in the selected range.")
+else:
+    for wstart in sorted(wk["week"].unique(), reverse=True):
+        block = wk[wk["week"] == wstart].copy()
+        block["channel_name"] = pd.Categorical(block["channel_name"], CHANNEL_ORDER, ordered=True)
+        block = block.sort_values("channel_name")
+        t = block[["came_in", "bot_handled", "to_human", "still_open"]].sum()
+        st.markdown(
+            f"**Week of {pd.to_datetime(wstart).strftime('%d %b %Y')}** — "
+            f"{int(t['came_in'])} in · {int(t['bot_handled'])} bot-handled · "
+            f"{int(t['to_human'])} to a human · {int(t['still_open'])} still open"
+        )
+        show = (block.set_index("channel_name")[["came_in", "bot_handled", "to_human", "still_open"]]
+                     .rename(columns={"came_in": "Came in", "bot_handled": "Bot handled",
+                                      "to_human": "→ To human", "still_open": "Still open"}))
+        show.index.name = "Channel"
+        st.dataframe(show, use_container_width=True)
+    st.caption(
+        "**Bot handled** ≈ **Came in** on Email & Chat (the bot touches every one); "
+        "**Web Form** is an agent-only channel, so its bot-handled is 0 and all of it goes "
+        "to a human. **Still open** = Zendesk status new/open/pending/hold (not solved/closed)."
+    )
 
 if df.empty:
-    st.info("No conversations in the selected date range.")
+    st.caption("_(No scored conversations in this range for the sections below.)_")
     st.stop()
+
+st.divider()
+st.markdown("### Bot quality detail")
 
 # --- Headline ------------------------------------------------------------------
 # Email is the only channel we can measure a true resolution rate for: every
