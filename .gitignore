@@ -10,6 +10,8 @@
 *.env
 .env.*
 !.env.example
+# `.env.op` holds 1Password op:// REFERENCES, never values — it is meant to be committed.
+!.env.op
 
 # Local data store (raw + scored conversations)
 *.duckdb
