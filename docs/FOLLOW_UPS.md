@@ -85,3 +85,37 @@ Three actionable buckets for prioritisation:
 
 **Open quantification:** run the LLM classifier over the backlog with this A/B/C rubric to get the
 exact volume/% an ACTIVE integration would resolve — the ROI number for the integration decision.
+
+## What else Zendesk can give us — checked against our account (30 Sep 2026)
+
+Read-only API check (subscription, settings, ticket fields; field fill-rates over the 1,000 most
+recent tickets, 28 Aug–30 Sep 2026, counts only).
+
+**Our account:** Support **Team** plan (not Suite), 4 agents, term ends 4 Jan 2027. One brand,
+one ticket form. CSAT is **off** (0 ratings). SLA policies: not available (403). So Explore
+Professional, SLAs, intelligent triage (topic/sentiment) and the new CSAT survey are all out on
+this plan. The bot is **Ultimate, i.e. an AI agents – Advanced agent** (tag `escalated_by_ultimate`).
+
+**The finding that matters: the tickets already carry the bot outcome, and we throw it away.**
+`pull_conversations.py` stores neither `tags` nor `custom_fields`. Zendesk itself fills:
+- `Resolution tier` on 67% of tickets: core resolution 325 · assisted escalation 174 ·
+  non-automated 109 · contained resolution 66 (of 1,000).
+- `Resolution type` = automated on 325.
+- `Which event can we help you with?` on 14% (Kerrville 52, Chicago 45, general 12, Toulouse 6,
+  Blenheim 6, Toronto 5). The bot also tags events itself (`ai_toulouse`, `ai_chicago`, …).
+- Channel mix is now email 422 · native messaging 383 · web 195. Messaging conversations,
+  including bot-contained ones, now arrive as tickets, which partly closes the web-chat gap above.
+
+**To do, in order:**
+1. **Store tags + the custom fields** (resolution tier/type, event, race division) in
+   `conversations`. Additive columns, same pull, no new API. Gives Zendesk's own bot-resolution
+   verdict per ticket (cross-check for our LLM judge) and support demand per event.
+2. **AI Agents Data Export API** (`/ai-agents/api/data-export/v3/get-signed-urls`): one row per bot
+   conversation incl. ones that never ticket, with resolution tier, BSAT and intents. Advanced
+   agents qualify; needs an API key from the AI agents dashboard ▸ Organization management.
+   Note the 18 May–1 Jun 2026 redefinition (Contained vs Verified) breaks any trend there.
+3. **Ticket metrics** (`/api/v2/ticket_metrics`): first-reply / resolution time / reopens per
+   event. Works on Team. No SLA events (no SLA policies on this plan).
+4. **Owner decisions, not builds:** switch CSAT on (Team supports the legacy survey); make the
+   event field required on the form; link requester to athlete by hashed email for a
+   repeat-rate test (privacy call, aggregates only).
