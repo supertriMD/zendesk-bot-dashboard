@@ -1,0 +1,14 @@
+# `gcloud builds submit` uploads this directory to Cloud Build. This file is an ALLOWLIST:
+# everything is excluded except what the Cloud Run job image needs. So .env / .env.save (plaintext
+# secrets), zendesk_dashboard.duckdb and calibration/ (conversation transcripts, customer PII) and
+# logs/ never leave the laptop. Adding a file to the image means adding it here AND to job.Dockerfile.
+# Check what would upload:  gcloud meta list-files-for-upload
+/*
+!/config.py
+!/db.py
+!/pull_conversations.py
+!/score_conversations.py
+!/classify_backlog.py
+!/deploy/
+/deploy/*.plist
+/deploy/deploy_cloud_run.sh

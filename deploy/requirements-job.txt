@@ -1,0 +1,8 @@
+# The Cloud Run job's dependencies only: requirements.txt minus Streamlit (the dashboard app).
+google-cloud-bigquery>=3.20
+db-dtypes>=1.2
+pyarrow>=14
+anthropic>=0.39
+requests>=2.31,<3
+python-dotenv>=1.0,<2
+pandas>=2.0,<3

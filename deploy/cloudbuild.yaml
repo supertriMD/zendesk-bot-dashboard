@@ -1,0 +1,9 @@
+# Builds the Zendesk job image. Invoked by deploy/deploy_cloud_run.sh:
+#   gcloud builds submit --config deploy/cloudbuild.yaml --substitutions _IMAGE=...,_GIT_SHA=... .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "deploy/job.Dockerfile", "--build-arg", "GIT_SHA=${_GIT_SHA}", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+substitutions:
+  _IMAGE: ""
+  _GIT_SHA: unknown
