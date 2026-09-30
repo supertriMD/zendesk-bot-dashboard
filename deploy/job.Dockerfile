@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r deploy/requirements-job.txt
 
 # Only the job's code. No .env: secrets arrive as env vars from Secret Manager, and BigQuery auth is
 # the job's service account via the metadata server (db.client() falls back to ADC), so no key file.
-COPY config.py db.py pull_conversations.py score_conversations.py classify_backlog.py ./
+COPY config.py db.py pull_conversations.py pull_bot_export.py score_conversations.py classify_backlog.py ./
 COPY deploy/cloudrun_entry.sh deploy/cloudrun_entry.sh
 
 # Provenance: the commit this image was built from (deploy script passes it through cloudbuild.yaml).

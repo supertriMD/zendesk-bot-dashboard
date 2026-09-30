@@ -38,6 +38,32 @@ SCORE_COLUMNS: List[str] = [
 RESOLUTION_PATH_COLUMNS: List[str] = [
     "conversation_id", "resolution_path", "path_reason", "classified_at", "model",
 ]
+# Zendesk's own ticket metadata: tags + custom fields (incl. the AI agent's resolution tier).
+# Its own table rather than extra columns on `conversations`, so it can be backfilled from the
+# ticket export alone (no comment fetch) and the dashboard's existing queries are untouched.
+TICKET_ATTRIBUTE_COLUMNS: List[str] = [
+    "conversation_id", "via_channel", "ticket_form_id", "brand_id", "priority", "ticket_type",
+    "satisfaction_score", "tags",
+    "zd_resolution_tier", "zd_resolution_type", "zd_event", "zd_race_division", "zd_topic",
+    "zd_inquiry", "zd_channel_group", "custom_fields_json",
+    "ticket_created_at", "ticket_updated_at", "pulled_at",
+]
+# AI agents (Ultimate) data export: one row per bot conversation, ticketed or not.
+# No message text is exported by Zendesk; conversations_data (session parameters, which can
+# carry contact details) is NOT stored whole, only its satisfaction keys (bsat_json).
+BOT_CONVERSATION_COLUMNS: List[str] = [
+    "conversation_id", "platform_conversation_id", "bot_id", "bot_name", "channel", "language",
+    "conversation_type", "conversation_status", "conversation_start_time", "conversation_end_time",
+    "resolution_tier", "last_resolution", "automated_resolution", "automated_resolution_reasoning",
+    "is_llm_conversation", "has_knowledge_response_attempt", "test_mode",
+    "bot_messages_count", "visitor_messages_count", "not_understood_messages_count",
+    "knowledge_response_generated_count", "knowledge_fallback_count",
+    "knowledge_not_understood_count", "knowledge_escalation_required_count",
+    "knowledge_error_occurred_count",
+    "labels_json", "triggered_use_cases_json", "triggered_intent_replies_json",
+    "triggered_procedures_json", "triggered_replies_json", "knowledge_sources_json",
+    "segments_json", "bsat_json", "conversations_data_keys", "export_date", "pulled_at",
+]
 
 # --- BigQuery table schemas ----------------------------------------------------
 _SF = bigquery.SchemaField
@@ -69,9 +95,45 @@ SCHEMAS: Dict[str, list] = {
     "pull_state": [
         _SF("key", "STRING"), _SF("value", "STRING"), _SF("updated_at", "TIMESTAMP"),
     ],
+    "ticket_attributes": [
+        _SF("conversation_id", "STRING"), _SF("via_channel", "STRING"),
+        _SF("ticket_form_id", "STRING"), _SF("brand_id", "STRING"),
+        _SF("priority", "STRING"), _SF("ticket_type", "STRING"),
+        _SF("satisfaction_score", "STRING"), _SF("tags", "STRING", mode="REPEATED"),
+        _SF("zd_resolution_tier", "STRING"), _SF("zd_resolution_type", "STRING"),
+        _SF("zd_event", "STRING"), _SF("zd_race_division", "STRING"),
+        _SF("zd_topic", "STRING"), _SF("zd_inquiry", "STRING"),
+        _SF("zd_channel_group", "STRING"), _SF("custom_fields_json", "STRING"),
+        _SF("ticket_created_at", "TIMESTAMP"), _SF("ticket_updated_at", "TIMESTAMP"),
+        _SF("pulled_at", "TIMESTAMP"),
+    ],
+    "bot_conversations": [
+        _SF("conversation_id", "STRING"), _SF("platform_conversation_id", "STRING"),
+        _SF("bot_id", "STRING"), _SF("bot_name", "STRING"), _SF("channel", "STRING"),
+        _SF("language", "STRING"), _SF("conversation_type", "STRING"),
+        _SF("conversation_status", "STRING"),
+        _SF("conversation_start_time", "TIMESTAMP"), _SF("conversation_end_time", "TIMESTAMP"),
+        _SF("resolution_tier", "STRING"), _SF("last_resolution", "STRING"),
+        _SF("automated_resolution", "BOOL"), _SF("automated_resolution_reasoning", "STRING"),
+        _SF("is_llm_conversation", "BOOL"), _SF("has_knowledge_response_attempt", "BOOL"),
+        _SF("test_mode", "BOOL"),
+        _SF("bot_messages_count", "INT64"), _SF("visitor_messages_count", "INT64"),
+        _SF("not_understood_messages_count", "INT64"),
+        _SF("knowledge_response_generated_count", "INT64"), _SF("knowledge_fallback_count", "INT64"),
+        _SF("knowledge_not_understood_count", "INT64"),
+        _SF("knowledge_escalation_required_count", "INT64"),
+        _SF("knowledge_error_occurred_count", "INT64"),
+        _SF("labels_json", "STRING"), _SF("triggered_use_cases_json", "STRING"),
+        _SF("triggered_intent_replies_json", "STRING"), _SF("triggered_procedures_json", "STRING"),
+        _SF("triggered_replies_json", "STRING"), _SF("knowledge_sources_json", "STRING"),
+        _SF("segments_json", "STRING"), _SF("bsat_json", "STRING"),
+        _SF("conversations_data_keys", "STRING", mode="REPEATED"),
+        _SF("export_date", "DATE"), _SF("pulled_at", "TIMESTAMP"),
+    ],
 }
 _PK = {"conversations": "conversation_id", "scores": "conversation_id",
-       "resolution_paths": "conversation_id", "pull_state": "key"}
+       "resolution_paths": "conversation_id", "pull_state": "key",
+       "ticket_attributes": "conversation_id", "bot_conversations": "conversation_id"}
 
 _client: Optional[bigquery.Client] = None
 
@@ -169,6 +231,14 @@ def upsert_scores(rows: Iterable[Dict]) -> int:
 
 def upsert_resolution_paths(rows: Iterable[Dict]) -> int:
     return _merge("resolution_paths", RESOLUTION_PATH_COLUMNS, rows)
+
+
+def upsert_ticket_attributes(rows: Iterable[Dict]) -> int:
+    return _merge("ticket_attributes", TICKET_ATTRIBUTE_COLUMNS, rows)
+
+
+def upsert_bot_conversations(rows: Iterable[Dict]) -> int:
+    return _merge("bot_conversations", BOT_CONVERSATION_COLUMNS, rows)
 
 
 def update_statuses(pairs: Iterable[Dict]) -> int:

@@ -16,11 +16,18 @@ Design:
 Usage:
   python pull_conversations.py --probe [--limit 20]   # inspect, no DB writes
   python pull_conversations.py [--since 2026-04-15] [--limit N] [--reset]
+  python pull_conversations.py --attributes-only --since 2024-01-01   # backfill tags/fields
+
+Every pulled ticket also writes a ticket_attributes row: its tags and custom-field values
+(incl. the AI agent's Resolution tier and the event field). Free-text custom fields are never
+stored. --attributes-only walks the ticket export WITHOUT fetching comments, so a history
+backfill is cheap and leaves the saved conversations cursor alone.
 """
 from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
 import re
 import sys
@@ -37,6 +44,7 @@ import db
 
 # Pull-state keys
 CURSOR_KEY = "tickets_after_cursor"
+ATTR_BACKFILL_KEY = "attributes_backfill_cursor"
 
 # Bot identification.
 # Discovered from the data: the bot ("Tri") posts as Zendesk's system/automation
@@ -111,6 +119,18 @@ class ZendeskClient:
             if not after_cursor:
                 return
             params = {"cursor": after_cursor}
+
+    def fetch_ticket_fields(self) -> List[dict]:
+        """All ticket field definitions (id, title, type, options). Read once per run."""
+        fields: List[dict] = []
+        url: Optional[str] = f"{self.base_url}/ticket_fields.json"
+        params: Optional[dict] = {"page[size]": 100}
+        while url:
+            payload = self.get(url, params=params)
+            fields.extend(payload.get("ticket_fields", []))
+            url = (payload.get("links") or {}).get("next") if (payload.get("meta") or {}).get("has_more") else None
+            params = None
+        return fields
 
     def fetch_comments(
         self, ticket_id
@@ -192,6 +212,68 @@ def normalize_transcript(text: str) -> str:
     text = re.sub(rf"\b{re.escape(BOT_TRANSCRIPT_NAME)}:", "Bot:", text)
     text = re.sub(r"Web User(?: [0-9a-fA-F]+)?:", "User:", text)
     return text
+
+
+class FieldMap:
+    """Maps custom-field ids to titles, option values to display names, and the strategic
+    fields (config.TICKET_FIELD_COLUMNS) to their named columns. Built from the live field
+    definitions each run, so nothing depends on a hardcoded field id."""
+
+    def __init__(self, fields: List[dict]) -> None:
+        norm = lambda t: " ".join((t or "").split()).lower()
+        by_title = {norm(title): col for col, title in config.TICKET_FIELD_COLUMNS.items()}
+        self.title: Dict[int, str] = {}
+        self.column: Dict[int, str] = {}
+        self.options: Dict[int, Dict[str, str]] = {}
+        self.stored: set = set()
+        for f in fields:
+            fid = f["id"]
+            self.title[fid] = " ".join((f.get("title") or "").split())
+            if f.get("type") not in config.TICKET_FIELD_FREE_TEXT_TYPES:
+                self.stored.add(fid)
+            if norm(f.get("title")) in by_title:
+                self.column[fid] = by_title[norm(f.get("title"))]
+            self.options[fid] = {o.get("value"): o.get("name") for o in f.get("custom_field_options") or []}
+        missing = set(config.TICKET_FIELD_COLUMNS) - set(self.column.values())
+        if missing:
+            print(f"  WARN: no Zendesk ticket field matches {sorted(missing)} "
+                  "(renamed? update config.TICKET_FIELD_COLUMNS)", file=sys.stderr)
+
+    def display(self, fid: int, value):
+        if isinstance(value, list):
+            return [self.options.get(fid, {}).get(v, v) for v in value]
+        return self.options.get(fid, {}).get(value, value)
+
+
+def assemble_attributes(ticket: dict, fields: FieldMap, pulled_at: datetime) -> dict:
+    """Build a ticket_attributes row: tags + non-free-text custom fields, never comment text."""
+    named: Dict[str, Optional[str]] = {col: None for col in config.TICKET_FIELD_COLUMNS}
+    other: Dict[str, object] = {}
+    for cf in ticket.get("custom_fields") or []:
+        fid, value = cf.get("id"), cf.get("value")
+        if fid not in fields.stored or value in (None, "", []):
+            continue
+        shown = fields.display(fid, value)
+        if fid in fields.column:
+            named[fields.column[fid]] = ", ".join(map(str, shown)) if isinstance(shown, list) else str(shown)
+        else:
+            other[fields.title.get(fid, str(fid))] = shown
+    sat = (ticket.get("satisfaction_rating") or {}).get("score")
+    return {
+        "conversation_id": str(ticket["id"]),
+        "via_channel": (ticket.get("via") or {}).get("channel"),
+        "ticket_form_id": str(ticket["ticket_form_id"]) if ticket.get("ticket_form_id") else None,
+        "brand_id": str(ticket["brand_id"]) if ticket.get("brand_id") else None,
+        "priority": ticket.get("priority"),
+        "ticket_type": ticket.get("type"),
+        "satisfaction_score": sat if sat not in (None, "unoffered") else None,
+        "tags": list(ticket.get("tags") or []),
+        **named,
+        "custom_fields_json": json.dumps(other, sort_keys=True) if other else None,
+        "ticket_created_at": ticket.get("created_at"),
+        "ticket_updated_at": ticket.get("updated_at"),
+        "pulled_at": pulled_at,
+    }
 
 
 def assemble_row(
@@ -309,12 +391,18 @@ def run(client: ZendeskClient, since: Optional[str], limit: Optional[int], reset
         start_time = _default_start_time()
 
     pulled_at = datetime.now(timezone.utc)
+    fields = FieldMap(client.fetch_ticket_fields())
     batch: List[dict] = []
+    attrs: List[dict] = []
     total = 0
+    total_attrs = 0
     skipped = 0
     last_cursor = cursor
 
     for ticket, after_cursor in client.iter_incremental_tickets(start_time, cursor):
+        # Attributes need no comment fetch, so they are kept even for a ticket whose
+        # comments 404; they are written BEFORE the cursor advances, like the conversations.
+        attrs.append(assemble_attributes(ticket, fields, pulled_at))
         comments, users_by_id = client.fetch_comments(ticket["id"])
         if comments is None:
             skipped += 1
@@ -324,21 +412,57 @@ def run(client: ZendeskClient, since: Optional[str], limit: Optional[int], reset
         last_cursor = after_cursor or last_cursor
         if len(batch) >= 200:
             total += db.upsert_conversations(batch)
+            total_attrs += db.upsert_ticket_attributes(attrs)
             if last_cursor:
                 db.set_pull_state(CURSOR_KEY, last_cursor)
             print(f"  upserted {total} so far...")
-            batch = []
+            batch, attrs = [], []
         if limit and total + len(batch) >= limit:
             break
 
     if batch:
         total += db.upsert_conversations(batch)
+    if attrs:
+        total_attrs += db.upsert_ticket_attributes(attrs)
     if last_cursor:
         db.set_pull_state(CURSOR_KEY, last_cursor)
 
-    print(f"Done. Upserted {total} conversations, skipped {skipped} deleted/inaccessible. Store now:")
+    print(f"Done. Upserted {total} conversations ({total_attrs} ticket attribute rows), "
+          f"skipped {skipped} deleted/inaccessible. Store now:")
     for table, n in db.table_counts().items():
         print(f"  {table}: {n}")
+
+
+def backfill_attributes(client: ZendeskClient, since: Optional[str], reset: bool) -> None:
+    """Tags + custom fields only, straight from the ticket export (no comment fetch).
+
+    Has its own resumable cursor, separate from the conversations cursor, so it can be
+    re-run or interrupted without affecting the daily pull.
+    """
+    db.init_db()
+    cursor = None if (reset or since) else db.get_pull_state(ATTR_BACKFILL_KEY)
+    start = since or config.BOT_EXPORT_START
+    start_time = int(datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+    pulled_at = datetime.now(timezone.utc)
+    fields = FieldMap(client.fetch_ticket_fields())
+    attrs: List[dict] = []
+    total = 0
+    last_cursor = cursor
+    print(f"Backfilling ticket attributes from {'saved cursor' if cursor else start}...")
+    for ticket, after_cursor in client.iter_incremental_tickets(start_time, cursor):
+        attrs.append(assemble_attributes(ticket, fields, pulled_at))
+        last_cursor = after_cursor or last_cursor
+        if len(attrs) >= 1000:
+            total += db.upsert_ticket_attributes(attrs)
+            if last_cursor:
+                db.set_pull_state(ATTR_BACKFILL_KEY, last_cursor)
+            print(f"  {total} so far...")
+            attrs = []
+    if attrs:
+        total += db.upsert_ticket_attributes(attrs)
+    if last_cursor:
+        db.set_pull_state(ATTR_BACKFILL_KEY, last_cursor)
+    print(f"Done. Upserted {total} ticket attribute rows.")
 
 
 def main() -> None:
@@ -351,10 +475,14 @@ def main() -> None:
                         help="Override start date (YYYY-MM-DD); ignores the saved cursor.")
     parser.add_argument("--reset", action="store_true",
                         help="Ignore the saved cursor and pull from the history window again.")
+    parser.add_argument("--attributes-only", action="store_true",
+                        help="Backfill tags + custom fields only (no comments, own cursor).")
     args = parser.parse_args()
 
     client = ZendeskClient()
-    if args.probe:
+    if args.attributes_only:
+        backfill_attributes(client, args.since, args.reset)
+    elif args.probe:
         probe(client, args.limit or 20, args.since)
     else:
         run(client, args.since, args.limit, args.reset)

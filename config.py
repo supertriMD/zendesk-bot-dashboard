@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from dotenv import load_dotenv
 
@@ -41,6 +41,32 @@ HISTORY_DAYS = int(os.environ.get("HISTORY_DAYS", "90"))
 # Politeness / safety when talking to the Zendesk API.
 ZENDESK_PAGE_SIZE = int(os.environ.get("ZENDESK_PAGE_SIZE", "100"))
 ZENDESK_MAX_RETRIES = int(os.environ.get("ZENDESK_MAX_RETRIES", "5"))
+
+# --- Ticket attributes (tags + custom fields) ----------------------------------
+# Named columns for the custom fields that matter to the strategy, matched on the field's
+# TITLE (case/whitespace-insensitive), never a hardcoded id, so a re-created field still maps.
+# Every other dropdown/checkbox/number field is kept in custom_fields_json. Free-text field
+# types are NEVER stored (they can hold emails or names; e.g. "Multi-recipient email ID").
+TICKET_FIELD_COLUMNS: Dict[str, str] = {
+    "zd_resolution_tier": "Resolution tier",
+    "zd_resolution_type": "Resolution type",
+    "zd_event": "Which event can we help you with?",
+    "zd_race_division": "Race Division",
+    "zd_topic": "Topic",
+    "zd_inquiry": "What are you inquiring about?",
+    "zd_channel_group": "Channel group",
+}
+TICKET_FIELD_FREE_TEXT_TYPES = {"text", "textarea", "regexp", "partialcreditcard", "lookup"}
+
+# --- AI agents (Ultimate) data export -------------------------------------------
+# One row per bot conversation, including chats that never became a ticket. The three
+# values come from the AI agents dashboard (Organization management); see docs/FOLLOW_UPS.md.
+AI_AGENTS_API_KEY_VAR = "AI_AGENTS_API_KEY"
+AI_AGENTS_BOT_ID_VAR = "AI_AGENTS_BOT_ID"
+AI_AGENTS_ORG_ID_VAR = "AI_AGENTS_ORG_ID"
+AI_AGENTS_REQUIRED_VARS: List[str] = [AI_AGENTS_API_KEY_VAR, AI_AGENTS_BOT_ID_VAR, AI_AGENTS_ORG_ID_VAR]
+# First day to backfill when nothing has been pulled yet (the export starts 1 Jan 2024).
+BOT_EXPORT_START = os.environ.get("BOT_EXPORT_START", "2024-01-01")
 
 # --- Dashboard ------------------------------------------------------------------
 # Single shared password gating the Streamlit dashboard. Read from the environment

@@ -7,6 +7,7 @@
 !/config.py
 !/db.py
 !/pull_conversations.py
+!/pull_bot_export.py
 !/score_conversations.py
 !/classify_backlog.py
 !/deploy/
