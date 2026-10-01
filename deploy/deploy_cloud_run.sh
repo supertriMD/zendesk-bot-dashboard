@@ -37,7 +37,7 @@ grep -qE "^AI_AGENTS_API_KEY=op://" .env.op 2>/dev/null && SECRETS+=(AI_AGENTS_A
 
 GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 git diff --quiet HEAD -- config.py db.py pull_conversations.py pull_bot_export.py score_conversations.py \
-  classify_backlog.py deploy/ .gcloudignore 2>/dev/null || GIT_SHA="$GIT_SHA-dirty"
+  classify_backlog.py views.sql deploy/ .gcloudignore 2>/dev/null || GIT_SHA="$GIT_SHA-dirty"
 
 step(){ echo; echo "── $* ──"; }
 have(){ command -v "$1" >/dev/null 2>&1; }

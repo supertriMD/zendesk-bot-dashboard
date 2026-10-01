@@ -10,6 +10,7 @@
 !/pull_bot_export.py
 !/score_conversations.py
 !/classify_backlog.py
+!/views.sql
 !/deploy/
 /deploy/*.plist
 /deploy/deploy_cloud_run.sh
