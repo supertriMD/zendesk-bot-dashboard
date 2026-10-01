@@ -248,7 +248,13 @@ def _merge(table: str, columns: List[str], rows: Iterable[Dict]) -> int:
     pk = _PK[table]
     schema = [f for f in SCHEMAS[table] if f.name in columns]
     staging = _tbl(f"_stg_{table}")
-    payload = [{col: _py(r.get(col)) for col in columns} for r in rows]
+    # One source row per key, last occurrence wins: MERGE refuses a key that matches twice, and a
+    # source can repeat one (the AI agents export listed a conversation twice in a still-growing
+    # day file, 1 Oct 2026). Callers order rows oldest -> newest where it matters.
+    latest: Dict = {}
+    for r in rows:
+        latest[r.get(pk)] = r
+    payload = [{col: _py(r.get(col)) for col in columns} for r in latest.values()]
     c.load_table_from_json(
         payload, staging,
         job_config=bigquery.LoadJobConfig(schema=schema, write_disposition="WRITE_TRUNCATE"),
@@ -262,7 +268,7 @@ def _merge(table: str, columns: List[str], rows: Iterable[Dict]) -> int:
         f"WHEN MATCHED THEN UPDATE SET {set_clause} "
         f"WHEN NOT MATCHED THEN INSERT ({cols}) VALUES ({vals})"
     ).result()
-    return len(rows)
+    return len(payload)
 
 
 def upsert_conversations(rows: Iterable[Dict]) -> int:

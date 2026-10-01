@@ -266,6 +266,7 @@ def run(days: Optional[List[date]], probe: bool) -> None:
     for day in days:
         rows = [to_row(r, day, pulled_at) for r in client.records(day)]
         rows = [r for r in rows if r.get("conversation_id")]
+        rows.sort(key=lambda r: (r.get("conversation_end_time") or "", r.get("session_ended_at") or ""))
         n = db.upsert_bot_conversations(rows) if rows else 0
         total += n
         if advance_state:                   # only after the day is written: a crash re-pulls it
