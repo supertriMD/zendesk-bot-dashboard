@@ -69,7 +69,16 @@ AI_AGENTS_BOT_IDS: List[str] = [b.strip() for b in os.environ.get(
     "AI_AGENTS_BOT_IDS", "6a4a9d689f8fdde94e39876f,6a41cee6fbfda88b1060d653").split(",") if b.strip()]
 AI_AGENTS_ORG_ID = os.environ.get("AI_AGENTS_ORG_ID", "6a16bc521f475afb692a1abe")
 # First day to backfill when nothing has been pulled yet (the export starts 1 Jan 2024).
-BOT_EXPORT_START = os.environ.get("BOT_EXPORT_START", "2024-01-01")
+BOT_EXPORT_START = os.environ.get("BOT_EXPORT_START", "2026-06-01")   # our bots' export starts Jul 2026
+# conversation_data (the bot's session variables) also holds the athlete's email and name, so it
+# is never stored whole. ONLY these keys are kept (allowlist, checked against the live export
+# 30 Sep 2026): what the bot captured about the question, not who asked it.
+BOT_SESSION_SIGNAL_KEYS: List[str] = [
+    "event_name", "how_help", "first_timer_or_fear", "asks_training_hours", "mentions_gear_or_kit",
+    "user_requested_human_or_refund_exception", "wants_escalation", "authenticated",
+    "usedLanguage", "lastDetectedLanguage", "active_language", "confidence_score",
+    "bsat", "csat", "satisfaction", "rating",
+]
 
 # --- Dashboard ------------------------------------------------------------------
 # Single shared password gating the Streamlit dashboard. Read from the environment

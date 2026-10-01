@@ -10,9 +10,10 @@ signed URLs to that day's immutable JSON file(s); files are built at midnight UT
 latest complete day is yesterday. Docs:
 https://developer.zendesk.com/documentation/ai-agents/getting-started/data-export/
 
-Privacy: Zendesk exports no message text. `conversations_data` holds session parameters
-(which can include contact details), so it is NOT stored; only its satisfaction keys are kept
-(bsat_json) plus the list of key names, so we can see what else exists without holding it.
+Privacy: Zendesk exports no message text. `conversation_data` holds the bot's session variables,
+which include the athlete's email and name, so it is NOT stored whole: only the allowlisted
+signal keys (config.BOT_SESSION_SIGNAL_KEYS: event, first-timer, escalation wish, language...)
+go to session_signals_json, plus the list of key names so new ones are visible.
 
 Credential: AI_AGENTS_API_KEY (AI agents dashboard ▸ Organization management ▸ API key; 1Password
 "Zendesk AI Agents Export"). The bot and organisation ids are config (config.AI_AGENTS_BOT_IDS,
@@ -42,7 +43,6 @@ import db
 
 STATE_KEY = "bot_export_last_date"
 REREAD_DAYS = 3
-_SATISFACTION_KEY = re.compile(r"bsat|csat|satisf|rating|feedback", re.I)
 # Keys never copied into extra_json, even if Zendesk adds them: anything that could be message
 # text or a person's contact details.
 _NEVER_STORE = re.compile(r"email|phone|name$|message$|text|transcript|address|visitor_?id", re.I)
@@ -150,11 +150,11 @@ def to_row(rec: dict, export_date: date, pulled_at: datetime) -> dict:
         except ValueError:
             data = None
     if isinstance(data, dict):
-        sat = {k: v for k, v in data.items() if _SATISFACTION_KEY.search(k)}
-        row["bsat_json"] = json.dumps(sat, sort_keys=True) if sat else None
+        keep = {k: v for k, v in data.items() if k in config.BOT_SESSION_SIGNAL_KEYS}
+        row["session_signals_json"] = json.dumps(keep, sort_keys=True, default=str) if keep else None
         row["conversations_data_keys"] = sorted(data.keys())
     else:
-        row["bsat_json"] = None
+        row["session_signals_json"] = None
         row["conversations_data_keys"] = []
     extra = {k: v for k, v in rec.items()
              if k not in known and not _NEVER_STORE.search(k) and v not in (None, "", [], {})}

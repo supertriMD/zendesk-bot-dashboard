@@ -50,7 +50,7 @@ TICKET_ATTRIBUTE_COLUMNS: List[str] = [
 ]
 # AI agents (Ultimate) data export: one row per bot conversation, ticketed or not.
 # No message text is exported by Zendesk; conversations_data (session parameters, which can
-# carry contact details) is NOT stored whole, only its satisfaction keys (bsat_json).
+# carry contact details) is NOT stored whole, only allowlisted signal keys (session_signals_json).
 BOT_CONVERSATION_COLUMNS: List[str] = [
     "conversation_id", "platform_conversation_id", "bot_id", "bot_name", "channel", "language",
     "conversation_type", "conversation_status", "conversation_start_time", "conversation_end_time",
@@ -62,7 +62,7 @@ BOT_CONVERSATION_COLUMNS: List[str] = [
     "knowledge_error_occurred_count",
     "labels_json", "triggered_use_cases_json", "triggered_intent_replies_json",
     "triggered_procedures_json", "triggered_replies_json", "knowledge_sources_json",
-    "segments_json", "bsat_json", "conversations_data_keys", "rbp_status_name",
+    "segments_json", "session_signals_json", "conversations_data_keys", "rbp_status_name",
     "session_ended_at", "extra_json", "export_date", "pulled_at",
 ]
 
@@ -127,7 +127,7 @@ SCHEMAS: Dict[str, list] = {
         _SF("labels_json", "STRING"), _SF("triggered_use_cases_json", "STRING"),
         _SF("triggered_intent_replies_json", "STRING"), _SF("triggered_procedures_json", "STRING"),
         _SF("triggered_replies_json", "STRING"), _SF("knowledge_sources_json", "STRING"),
-        _SF("segments_json", "STRING"), _SF("bsat_json", "STRING"),
+        _SF("segments_json", "STRING"), _SF("session_signals_json", "STRING"),
         _SF("conversations_data_keys", "STRING", mode="REPEATED"),
         _SF("rbp_status_name", "STRING"), _SF("session_ended_at", "TIMESTAMP"),
         _SF("extra_json", "STRING"),
