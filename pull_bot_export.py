@@ -14,10 +14,10 @@ Privacy: Zendesk exports no message text. `conversations_data` holds session par
 (which can include contact details), so it is NOT stored; only its satisfaction keys are kept
 (bsat_json) plus the list of key names, so we can see what else exists without holding it.
 
-Credentials (from the AI agents dashboard ▸ Organization management): AI_AGENTS_API_KEY,
-AI_AGENTS_BOT_ID, AI_AGENTS_ORG_ID. The export is per bot and we run two (email "TRI" and
-messaging "Tri"), so AI_AGENTS_BOT_ID is a comma-separated list; every bot is pulled each day. If none is set the step SKIPS cleanly (exit 0), so the
-daily job runs before they are configured; if some but not all are set, it fails loud.
+Credential: AI_AGENTS_API_KEY (AI agents dashboard ▸ Organization management ▸ API key; 1Password
+"Zendesk AI Agents Export"). The bot and organisation ids are config (config.AI_AGENTS_BOT_IDS,
+AI_AGENTS_ORG_ID): the export is per bot and we run two, email "TRI" and messaging "Tri".
+If the key is unset the step SKIPS cleanly (exit 0); a wrong key fails loud (401).
 
 Usage:
   python pull_bot_export.py                  # every day since the last one pulled, to yesterday
@@ -41,7 +41,14 @@ import config
 import db
 
 STATE_KEY = "bot_export_last_date"
+REREAD_DAYS = 3
 _SATISFACTION_KEY = re.compile(r"bsat|csat|satisf|rating|feedback", re.I)
+# Keys never copied into extra_json, even if Zendesk adds them: anything that could be message
+# text or a person's contact details.
+_NEVER_STORE = re.compile(r"email|phone|name$|message$|text|transcript|address|visitor_?id", re.I)
+# Seen in the live export but deliberately not stored (account plumbing, duplicates).
+_IGNORED = {"instance_account_id", "zdp_meta_processed_timestamp", "conversation_end_date",
+            "conversation_data", "conversations_data"}
 
 # export field -> our column, for the plain scalar fields (types coerced below).
 _TEXT = {
@@ -64,8 +71,10 @@ _INT = {
     "knowledge_escalationRequired_count": "knowledge_escalation_required_count",
     "knowledge_errorOccurred_count": "knowledge_error_occurred_count",
 }
+_TEXT["rbp_status_name"] = "rbp_status_name"
 _TIME = {"conversation_start_time": "conversation_start_time",
-         "conversation_end_time": "conversation_end_time"}
+         "conversation_end_time": "conversation_end_time",
+         "session_ended_timestamp": "session_ended_at"}
 _JSON = {
     "labels": "labels_json", "triggered_use_cases": "triggered_use_cases_json",
     "triggered_intent_replies": "triggered_intent_replies_json",
@@ -118,6 +127,9 @@ def _ts(field: str, v) -> Optional[str]:
 
 
 def to_row(rec: dict, export_date: date, pulled_at: datetime) -> dict:
+    # The live export uses UPPER_CASE keys (the docs show lower case): match case-insensitively.
+    rec = {k.lower(): v for k, v in rec.items()}
+    known = {k.lower() for k in (*_TEXT, *_BOOL, *_INT, *_TIME, *_JSON)} | _IGNORED
     row: Dict[str, object] = {}
     for src, col in _TEXT.items():
         v = rec.get(src)
@@ -125,13 +137,13 @@ def to_row(rec: dict, export_date: date, pulled_at: datetime) -> dict:
     for src, col in _BOOL.items():
         row[col] = _bool(src, rec.get(src))
     for src, col in _INT.items():
-        row[col] = _int(src, rec.get(src))
+        row[col] = _int(src, rec.get(src.lower()))
     for src, col in _TIME.items():
         row[col] = _ts(src, rec.get(src))
     for src, col in _JSON.items():
         v = rec.get(src)
         row[col] = None if v in (None, [], {}) else json.dumps(v, sort_keys=True)
-    data = rec.get("conversations_data")
+    data = rec.get("conversation_data", rec.get("conversations_data"))
     if isinstance(data, str):
         try:
             data = json.loads(data)
@@ -144,6 +156,9 @@ def to_row(rec: dict, export_date: date, pulled_at: datetime) -> dict:
     else:
         row["bsat_json"] = None
         row["conversations_data_keys"] = []
+    extra = {k: v for k, v in rec.items()
+             if k not in known and not _NEVER_STORE.search(k) and v not in (None, "", [], {})}
+    row["extra_json"] = json.dumps(extra, sort_keys=True, default=str) if extra else None
     row["export_date"] = export_date.isoformat()
     row["pulled_at"] = pulled_at
     return row
@@ -153,12 +168,16 @@ def to_row(rec: dict, export_date: date, pulled_at: datetime) -> dict:
 class BotExportClient:
     def __init__(self) -> None:
         config.require(config.AI_AGENTS_REQUIRED_VARS + [config.ZENDESK_SUBDOMAIN_VAR])
+        if not config.AI_AGENTS_BOT_IDS or not config.AI_AGENTS_ORG_ID:
+            raise RuntimeError("AI agents export: no bot ids / organisation id configured")
         self.url = (f"https://{os.environ[config.ZENDESK_SUBDOMAIN_VAR]}.zendesk.com"
                     "/ai-agents/api/data-export/v3/get-signed-urls")
-        self.bot_ids = [b.strip() for b in os.environ[config.AI_AGENTS_BOT_ID_VAR].split(",") if b.strip()]
+        self.bot_ids = config.AI_AGENTS_BOT_IDS
         self.headers = {
-            "authorization": f"Bearer {os.environ[config.AI_AGENTS_API_KEY_VAR]}",
-            "organizationId": os.environ[config.AI_AGENTS_ORG_ID_VAR],
+            # The raw key, NOT "Bearer <key>": the docs say bearer, but the live API returns 401
+            # for that and 200 for the bare key (tested 30 Sep 2026).
+            "authorization": os.environ[config.AI_AGENTS_API_KEY_VAR].strip(),
+            "organizationId": config.AI_AGENTS_ORG_ID,
             "Content-Type": "application/json",
         }
 
@@ -171,6 +190,8 @@ class BotExportClient:
                 print(f"  {resp.status_code} on {day}; retry in {wait}s", file=sys.stderr)
                 time.sleep(wait)
                 continue
+            if resp.status_code == 404:
+                return {"urls": []}           # no export for that bot/day (e.g. before it existed)
             if resp.status_code == 401:
                 raise RuntimeError("AI agents export: 401 Unauthorized. The API key is wrong or "
                                    "revoked (it is shown once when generated; make a new one).")
@@ -211,9 +232,9 @@ def _days(start: date, end: date) -> Iterable[date]:
 def run(days: Optional[List[date]], probe: bool) -> None:
     present = [v for v in config.AI_AGENTS_REQUIRED_VARS if os.environ.get(v)]
     if not present and not probe:
-        print("SKIP: AI agents export not configured (AI_AGENTS_API_KEY / _BOT_ID / _ORG_ID unset).")
+        print("SKIP: AI agents export not configured (AI_AGENTS_API_KEY unset).")
         return
-    client = BotExportClient()   # fails loud if only some are set
+    client = BotExportClient()
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
 
     if probe:
@@ -228,7 +249,10 @@ def run(days: Optional[List[date]], probe: bool) -> None:
     db.init_db()
     if not days:
         last = db.get_pull_state(STATE_KEY)
-        start = (date.fromisoformat(last) + timedelta(days=1)) if last else date.fromisoformat(config.BOT_EXPORT_START)
+        # Re-read a short trailing window: a day's file was seen to GROW after midnight (29 Sep 2026:
+        # 17 then 19 records), so "immutable" isn't true at first. The MERGE makes overlap safe.
+        start = (min(date.fromisoformat(last) + timedelta(days=1), yesterday - timedelta(days=REREAD_DAYS - 1))
+                 if last else date.fromisoformat(config.BOT_EXPORT_START))
         days = list(_days(start, yesterday))
         advance_state = True
     else:

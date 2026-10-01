@@ -61,10 +61,13 @@ TICKET_FIELD_FREE_TEXT_TYPES = {"text", "textarea", "regexp", "partialcreditcard
 # --- AI agents (Ultimate) data export -------------------------------------------
 # One row per bot conversation, including chats that never became a ticket. The three
 # values come from the AI agents dashboard (Organization management); see docs/FOLLOW_UPS.md.
+# Only the API key is secret. The ids are read from the dashboard (30 Sep 2026) and kept here so
+# a new bot is a config edit: TRI (email) and Tri (messaging); the export is per bot.
 AI_AGENTS_API_KEY_VAR = "AI_AGENTS_API_KEY"
-AI_AGENTS_BOT_ID_VAR = "AI_AGENTS_BOT_ID"
-AI_AGENTS_ORG_ID_VAR = "AI_AGENTS_ORG_ID"
-AI_AGENTS_REQUIRED_VARS: List[str] = [AI_AGENTS_API_KEY_VAR, AI_AGENTS_BOT_ID_VAR, AI_AGENTS_ORG_ID_VAR]
+AI_AGENTS_REQUIRED_VARS: List[str] = [AI_AGENTS_API_KEY_VAR]
+AI_AGENTS_BOT_IDS: List[str] = [b.strip() for b in os.environ.get(
+    "AI_AGENTS_BOT_IDS", "6a4a9d689f8fdde94e39876f,6a41cee6fbfda88b1060d653").split(",") if b.strip()]
+AI_AGENTS_ORG_ID = os.environ.get("AI_AGENTS_ORG_ID", "6a16bc521f475afb692a1abe")
 # First day to backfill when nothing has been pulled yet (the export starts 1 Jan 2024).
 BOT_EXPORT_START = os.environ.get("BOT_EXPORT_START", "2024-01-01")
 

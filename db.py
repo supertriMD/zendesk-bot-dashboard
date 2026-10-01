@@ -62,7 +62,8 @@ BOT_CONVERSATION_COLUMNS: List[str] = [
     "knowledge_error_occurred_count",
     "labels_json", "triggered_use_cases_json", "triggered_intent_replies_json",
     "triggered_procedures_json", "triggered_replies_json", "knowledge_sources_json",
-    "segments_json", "bsat_json", "conversations_data_keys", "export_date", "pulled_at",
+    "segments_json", "bsat_json", "conversations_data_keys", "rbp_status_name",
+    "session_ended_at", "extra_json", "export_date", "pulled_at",
 ]
 
 # --- BigQuery table schemas ----------------------------------------------------
@@ -128,6 +129,8 @@ SCHEMAS: Dict[str, list] = {
         _SF("triggered_replies_json", "STRING"), _SF("knowledge_sources_json", "STRING"),
         _SF("segments_json", "STRING"), _SF("bsat_json", "STRING"),
         _SF("conversations_data_keys", "STRING", mode="REPEATED"),
+        _SF("rbp_status_name", "STRING"), _SF("session_ended_at", "TIMESTAMP"),
+        _SF("extra_json", "STRING"),
         _SF("export_date", "DATE"), _SF("pulled_at", "TIMESTAMP"),
     ],
 }

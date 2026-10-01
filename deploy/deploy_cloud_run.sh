@@ -31,16 +31,9 @@ SCHEDULE="${SCHEDULE:-30 6 * * *}"                 # 06:30, the time the launchd
 TZ_="${TZ_:-Europe/London}"
 TASK_TIMEOUT="${TASK_TIMEOUT:-3600}"               # a normal day is minutes; headroom for a backlog
 SECRETS=(ZENDESK_SUBDOMAIN ZENDESK_EMAIL ZENDESK_API_TOKEN ANTHROPIC_API_KEY)
-# AI agents export credentials: mounted only once their op:// references exist in .env.op.
-# Until then pull_bot_export.py SKIPS cleanly. All three or none (the script fails on a partial set).
-OPTIONAL_SECRETS=(AI_AGENTS_API_KEY AI_AGENTS_BOT_ID AI_AGENTS_ORG_ID)
-_opt_found=0
-for s in "${OPTIONAL_SECRETS[@]}"; do grep -qE "^$s=op://" .env.op 2>/dev/null && _opt_found=$((_opt_found+1)); done
-case "$_opt_found" in
-  0) ;;
-  3) SECRETS+=("${OPTIONAL_SECRETS[@]}") ;;
-  *) echo "FAIL: .env.op has $_opt_found of the 3 AI_AGENTS_* references; add all three or none."; exit 1 ;;
-esac
+# AI agents export key: mounted once its op:// reference exists in .env.op (until then
+# pull_bot_export.py SKIPS cleanly). The bot/org ids are config, not secrets.
+grep -qE "^AI_AGENTS_API_KEY=op://" .env.op 2>/dev/null && SECRETS+=(AI_AGENTS_API_KEY)
 
 GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 git diff --quiet HEAD -- config.py db.py pull_conversations.py pull_bot_export.py score_conversations.py \
