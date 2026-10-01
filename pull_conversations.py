@@ -102,23 +102,43 @@ class ZendeskClient:
 
     def iter_incremental_tickets(
         self, start_time: Optional[int], cursor: Optional[str]
-    ) -> Iterator[Tuple[dict, Optional[str]]]:
-        """Yield (ticket, after_cursor) from the cursor-based incremental export.
+    ) -> Iterator[Tuple[dict, Optional[str], Optional[dict]]]:
+        """Yield (ticket, after_cursor, metric_set) from the cursor-based incremental export.
 
-        Start from a saved cursor if we have one, else from start_time (unix).
+        Start from a saved cursor if we have one, else from start_time (unix). The ticket's
+        metric set (reply / resolution / wait times, reopens) is sideloaded on the same
+        request (include=metric_sets), so response-speed data costs no extra API calls.
         """
         path = "/incremental/tickets/cursor.json"
         params: dict = {"cursor": cursor} if cursor else {"start_time": start_time}
         while True:
-            payload = self.get(path, params=params)
+            payload = self.get(path, params={**params, "include": "metric_sets"})
             after_cursor = payload.get("after_cursor")
+            metrics = {m.get("ticket_id"): m for m in payload.get("metric_sets", [])}
             for ticket in payload.get("tickets", []):
-                yield ticket, after_cursor
+                yield ticket, after_cursor, metrics.get(ticket.get("id"))
             if payload.get("end_of_stream"):
                 return
             if not after_cursor:
                 return
             params = {"cursor": after_cursor}
+
+    def messaging_conversation_id(self, ticket_id) -> Optional[str]:
+        """The messaging (Sunshine) conversation id behind a web-messaging ticket, from its
+        audit events. It is how a bot conversation in the AI agents export is matched to its
+        ticket. Only called for native_messaging tickets (one extra GET each)."""
+        url: Optional[str] = f"{self.base_url}/tickets/{ticket_id}/audits.json"
+        while url:
+            payload = self.get(url, allow_status=(404,))
+            if payload is None:
+                return None
+            for audit in payload.get("audits", []):
+                for ev in audit.get("events", []):
+                    v = ev.get("value")
+                    if isinstance(v, dict) and v.get("conversation_id"):
+                        return str(v["conversation_id"])
+            url = payload.get("next_page")
+        return None
 
     def fetch_ticket_fields(self) -> List[dict]:
         """All ticket field definitions (id, title, type, options). Read once per run."""
@@ -245,7 +265,29 @@ class FieldMap:
         return self.options.get(fid, {}).get(value, value)
 
 
-def assemble_attributes(ticket: dict, fields: FieldMap, pulled_at: datetime) -> dict:
+def assemble_metrics(ticket: dict, m: dict, pulled_at: datetime) -> dict:
+    """A ticket_metrics row: Zendesk's own response-speed measures (calendar minutes; this
+    account has no business hours, so business == calendar)."""
+    cal = lambda k: (m.get(k) or {}).get("calendar")
+    return {
+        "conversation_id": str(ticket["id"]),
+        "reply_time_min": cal("reply_time_in_minutes"),
+        "first_resolution_time_min": cal("first_resolution_time_in_minutes"),
+        "full_resolution_time_min": cal("full_resolution_time_in_minutes"),
+        "agent_wait_time_min": cal("agent_wait_time_in_minutes"),
+        "requester_wait_time_min": cal("requester_wait_time_in_minutes"),
+        "on_hold_time_min": cal("on_hold_time_in_minutes"),
+        "reopens": m.get("reopens"), "replies": m.get("replies"),
+        "group_stations": m.get("group_stations"), "assignee_stations": m.get("assignee_stations"),
+        "initially_assigned_at": m.get("initially_assigned_at"), "solved_at": m.get("solved_at"),
+        "latest_comment_added_at": m.get("latest_comment_added_at"),
+        "metric_updated_at": m.get("updated_at"),
+        "pulled_at": pulled_at,
+    }
+
+
+def assemble_attributes(ticket: dict, fields: FieldMap, pulled_at: datetime,
+                        client: Optional["ZendeskClient"] = None) -> dict:
     """Build a ticket_attributes row: tags + non-free-text custom fields, never comment text."""
     named: Dict[str, Optional[str]] = {col: None for col in config.TICKET_FIELD_COLUMNS}
     other: Dict[str, object] = {}
@@ -270,6 +312,9 @@ def assemble_attributes(ticket: dict, fields: FieldMap, pulled_at: datetime) -> 
         "tags": list(ticket.get("tags") or []),
         **named,
         "custom_fields_json": json.dumps(other, sort_keys=True) if other else None,
+        "messaging_conversation_id": (
+            client.messaging_conversation_id(ticket["id"])
+            if client and (ticket.get("via") or {}).get("channel") == "native_messaging" else None),
         "ticket_created_at": ticket.get("created_at"),
         "ticket_updated_at": ticket.get("updated_at"),
         "pulled_at": pulled_at,
@@ -349,7 +394,7 @@ def probe(client: ZendeskClient, limit: int, since: Optional[str] = None) -> Non
     sample_shown = 0
     skipped = 0
 
-    for i, (ticket, _cursor) in enumerate(client.iter_incremental_tickets(start_time, None)):
+    for i, (ticket, _cursor, _metrics) in enumerate(client.iter_incremental_tickets(start_time, None)):
         if i >= limit:
             break
         channel_counts[normalize_channel((ticket.get("via") or {}).get("channel"))] += 1
@@ -394,15 +439,18 @@ def run(client: ZendeskClient, since: Optional[str], limit: Optional[int], reset
     fields = FieldMap(client.fetch_ticket_fields())
     batch: List[dict] = []
     attrs: List[dict] = []
+    metrics: List[dict] = []
     total = 0
     total_attrs = 0
     skipped = 0
     last_cursor = cursor
 
-    for ticket, after_cursor in client.iter_incremental_tickets(start_time, cursor):
-        # Attributes need no comment fetch, so they are kept even for a ticket whose
+    for ticket, after_cursor, metric_set in client.iter_incremental_tickets(start_time, cursor):
+        # Attributes + metrics need no comment fetch, so they are kept even for a ticket whose
         # comments 404; they are written BEFORE the cursor advances, like the conversations.
-        attrs.append(assemble_attributes(ticket, fields, pulled_at))
+        attrs.append(assemble_attributes(ticket, fields, pulled_at, client))
+        if metric_set:
+            metrics.append(assemble_metrics(ticket, metric_set, pulled_at))
         comments, users_by_id = client.fetch_comments(ticket["id"])
         if comments is None:
             skipped += 1
@@ -413,10 +461,11 @@ def run(client: ZendeskClient, since: Optional[str], limit: Optional[int], reset
         if len(batch) >= 200:
             total += db.upsert_conversations(batch)
             total_attrs += db.upsert_ticket_attributes(attrs)
+            db.upsert_ticket_metrics(metrics)
             if last_cursor:
                 db.set_pull_state(CURSOR_KEY, last_cursor)
             print(f"  upserted {total} so far...")
-            batch, attrs = [], []
+            batch, attrs, metrics = [], [], []
         if limit and total + len(batch) >= limit:
             break
 
@@ -424,6 +473,8 @@ def run(client: ZendeskClient, since: Optional[str], limit: Optional[int], reset
         total += db.upsert_conversations(batch)
     if attrs:
         total_attrs += db.upsert_ticket_attributes(attrs)
+    if metrics:
+        db.upsert_ticket_metrics(metrics)
     if last_cursor:
         db.set_pull_state(CURSOR_KEY, last_cursor)
 
@@ -449,17 +500,23 @@ def backfill_attributes(client: ZendeskClient, since: Optional[str], reset: bool
     total = 0
     last_cursor = cursor
     print(f"Backfilling ticket attributes from {'saved cursor' if cursor else start}...")
-    for ticket, after_cursor in client.iter_incremental_tickets(start_time, cursor):
-        attrs.append(assemble_attributes(ticket, fields, pulled_at))
+    metrics: List[dict] = []
+    for ticket, after_cursor, metric_set in client.iter_incremental_tickets(start_time, cursor):
+        attrs.append(assemble_attributes(ticket, fields, pulled_at, client))
+        if metric_set:
+            metrics.append(assemble_metrics(ticket, metric_set, pulled_at))
         last_cursor = after_cursor or last_cursor
         if len(attrs) >= 1000:
             total += db.upsert_ticket_attributes(attrs)
+            db.upsert_ticket_metrics(metrics)
             if last_cursor:
                 db.set_pull_state(ATTR_BACKFILL_KEY, last_cursor)
             print(f"  {total} so far...")
-            attrs = []
+            attrs, metrics = [], []
     if attrs:
         total += db.upsert_ticket_attributes(attrs)
+    if metrics:
+        db.upsert_ticket_metrics(metrics)
     if last_cursor:
         db.set_pull_state(ATTR_BACKFILL_KEY, last_cursor)
     print(f"Done. Upserted {total} ticket attribute rows.")

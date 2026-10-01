@@ -45,8 +45,15 @@ TICKET_ATTRIBUTE_COLUMNS: List[str] = [
     "conversation_id", "via_channel", "ticket_form_id", "brand_id", "priority", "ticket_type",
     "satisfaction_score", "tags",
     "zd_resolution_tier", "zd_resolution_type", "zd_event", "zd_race_division", "zd_topic",
-    "zd_inquiry", "zd_channel_group", "custom_fields_json",
+    "zd_inquiry", "zd_channel_group", "custom_fields_json", "messaging_conversation_id",
     "ticket_created_at", "ticket_updated_at", "pulled_at",
+]
+# Zendesk's ticket metric set (sideloaded on the same ticket export): response speed.
+TICKET_METRIC_COLUMNS: List[str] = [
+    "conversation_id", "reply_time_min", "first_resolution_time_min", "full_resolution_time_min",
+    "agent_wait_time_min", "requester_wait_time_min", "on_hold_time_min", "reopens", "replies",
+    "group_stations", "assignee_stations", "initially_assigned_at", "solved_at",
+    "latest_comment_added_at", "metric_updated_at", "pulled_at",
 ]
 # AI agents (Ultimate) data export: one row per bot conversation, ticketed or not.
 # No message text is exported by Zendesk; conversations_data (session parameters, which can
@@ -105,7 +112,19 @@ SCHEMAS: Dict[str, list] = {
         _SF("zd_event", "STRING"), _SF("zd_race_division", "STRING"),
         _SF("zd_topic", "STRING"), _SF("zd_inquiry", "STRING"),
         _SF("zd_channel_group", "STRING"), _SF("custom_fields_json", "STRING"),
+        _SF("messaging_conversation_id", "STRING"),
         _SF("ticket_created_at", "TIMESTAMP"), _SF("ticket_updated_at", "TIMESTAMP"),
+        _SF("pulled_at", "TIMESTAMP"),
+    ],
+    "ticket_metrics": [
+        _SF("conversation_id", "STRING"),
+        _SF("reply_time_min", "INT64"), _SF("first_resolution_time_min", "INT64"),
+        _SF("full_resolution_time_min", "INT64"), _SF("agent_wait_time_min", "INT64"),
+        _SF("requester_wait_time_min", "INT64"), _SF("on_hold_time_min", "INT64"),
+        _SF("reopens", "INT64"), _SF("replies", "INT64"),
+        _SF("group_stations", "INT64"), _SF("assignee_stations", "INT64"),
+        _SF("initially_assigned_at", "TIMESTAMP"), _SF("solved_at", "TIMESTAMP"),
+        _SF("latest_comment_added_at", "TIMESTAMP"), _SF("metric_updated_at", "TIMESTAMP"),
         _SF("pulled_at", "TIMESTAMP"),
     ],
     "bot_conversations": [
@@ -136,7 +155,8 @@ SCHEMAS: Dict[str, list] = {
 }
 _PK = {"conversations": "conversation_id", "scores": "conversation_id",
        "resolution_paths": "conversation_id", "pull_state": "key",
-       "ticket_attributes": "conversation_id", "bot_conversations": "conversation_id"}
+       "ticket_attributes": "conversation_id", "bot_conversations": "conversation_id",
+       "ticket_metrics": "conversation_id"}
 
 _client: Optional[bigquery.Client] = None
 
@@ -195,7 +215,28 @@ def init_db() -> None:
     dataset.location = config.BQ_LOCATION
     c.create_dataset(dataset, exists_ok=True)
     for name, schema in SCHEMAS.items():
-        c.create_table(bigquery.Table(_tbl(name), schema=schema), exists_ok=True)
+        table = c.create_table(bigquery.Table(_tbl(name), schema=schema), exists_ok=True)
+        # Additive schema evolution: a column added to SCHEMAS after the table was created is
+        # appended here (BigQuery allows adding NULLABLE/REPEATED columns, never dropping).
+        have = {f.name for f in table.schema}
+        missing = [f for f in schema if f.name not in have]
+        if missing:
+            table.schema = list(table.schema) + missing
+            c.update_table(table, ["schema"])
+            print(f"  {name}: added column(s) {[f.name for f in missing]}")
+    apply_views()
+
+
+def apply_views() -> None:
+    """(Re)create the reporting views in views.sql. Idempotent (CREATE OR REPLACE)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "views.sql")
+    if not os.path.exists(path):
+        return
+    ds = f"{config.BQ_PROJECT}.{config.BQ_DATASET}"
+    sql = open(path, encoding="utf-8").read().replace("${DS}", ds)
+    for stmt in (x.strip() for x in sql.split("\n;;\n")):
+        if stmt and any(not l.strip().startswith("--") for l in stmt.splitlines() if l.strip()):
+            client().query(stmt).result()
 
 
 # --- Idempotent writes (load-to-staging + MERGE) -------------------------------
@@ -238,6 +279,10 @@ def upsert_resolution_paths(rows: Iterable[Dict]) -> int:
 
 def upsert_ticket_attributes(rows: Iterable[Dict]) -> int:
     return _merge("ticket_attributes", TICKET_ATTRIBUTE_COLUMNS, rows)
+
+
+def upsert_ticket_metrics(rows: Iterable[Dict]) -> int:
+    return _merge("ticket_metrics", TICKET_METRIC_COLUMNS, rows)
 
 
 def upsert_bot_conversations(rows: Iterable[Dict]) -> int:
