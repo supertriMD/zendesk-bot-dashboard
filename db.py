@@ -233,7 +233,8 @@ def apply_views() -> None:
     if not os.path.exists(path):
         return
     ds = f"{config.BQ_PROJECT}.{config.BQ_DATASET}"
-    sql = open(path, encoding="utf-8").read().replace("${DS}", ds)
+    dash = f"{config.BQ_PROJECT}.{config.BQ_DASH_DATASET}"
+    sql = open(path, encoding="utf-8").read().replace("${DS}", ds).replace("${DASH}", dash)
     for stmt in (x.strip() for x in sql.split("\n;;\n")):
         if stmt and any(not l.strip().startswith("--") for l in stmt.splitlines() if l.strip()):
             client().query(stmt).result()

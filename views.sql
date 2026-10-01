@@ -149,3 +149,38 @@ SELECT
   COUNTIF(reopens > 0) AS reopened
 FROM `${DS}.v_questions`
 GROUP BY 1, 2, 3
+;;
+
+-- zendesk_dash.v_support_questions — the ONLY Zendesk object the management dashboard reads.
+-- Lives in its own dataset (zendesk_dash) and is an AUTHORIZED view on zendesk_bot, so the
+-- dashboard's service account can read this and nothing else: no ticket ids, subjects, tags,
+-- transcripts or bot reasoning. One row per question; the dashboard aggregates.
+CREATE OR REPLACE VIEW `${DASH}.v_support_questions` AS
+SELECT
+  question_date,
+  DATE_TRUNC(question_date, MONTH) AS month,
+  source,
+  CASE
+    WHEN source = 'bot_only' THEN 'Bot chat, no ticket'
+    WHEN channel = 'email' THEN 'Email'
+    WHEN channel = 'web' THEN 'Web form'
+    WHEN channel = 'messaging' THEN 'Chat to a person'
+    ELSE channel
+  END AS channel_group,
+  event,
+  COALESCE(primary_topic,
+           IF(source = 'bot_only', CONCAT('Article: ', bot_articles[SAFE_OFFSET(0)]), NULL)) AS topic,
+  our_resolution,
+  resolution_path,
+  IFNULL(our_resolution, '') != 'no_question' AS is_question,
+  (our_resolution = 'resolved' OR (our_resolution IS NULL AND IFNULL(zendesk_automated_resolution, FALSE))) AS bot_answered,
+  our_resolution IN ('partial', 'unresolved') AS not_fully_answered,
+  bot_involved,
+  ended_with_human,
+  ARRAY_LENGTH(bot_articles) > 0 AS bot_used_article,
+  IFNULL(bot_not_understood, 0) > 0 AS bot_not_understood,
+  IFNULL(bot_first_timer_signal, FALSE) AS first_timer_signal,
+  reply_time_min,
+  full_resolution_time_min,
+  IFNULL(reopens, 0) > 0 AS reopened
+FROM `${DS}.v_questions`

@@ -24,6 +24,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 BQ_PROJECT = os.environ.get("BQ_PROJECT", "supertri-chat-bot")
 BQ_DATASET = os.environ.get("BQ_DATASET", "zendesk_bot")
 BQ_LOCATION = os.environ.get("BQ_LOCATION", "EU")
+# Counts-only views for the management dashboard (authorized on BQ_DATASET; see views.sql).
+BQ_DASH_DATASET = os.environ.get("BQ_DASH_DATASET", "zendesk_dash")
 
 # --- LLM judge -----------------------------------------------------------------
 # Model is config, not code, so switching (e.g. Opus -> Sonnet for bulk) is one line.
