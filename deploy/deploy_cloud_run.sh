@@ -16,6 +16,8 @@
 # Options (env):
 #   SKIP_SCHEDULER=1   deploy the job only, no daily trigger (run it by hand to test)
 #   RUN_NOW=1          execute the job once straight after deploying and wait for the result
+#   CODE_ONLY=1        ship a code change only: build + update the job image, skipping APIs,
+#                      secrets, IAM and the scheduler (no 1Password needed; secrets stay as mounted)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -47,7 +49,7 @@ have gcloud || { echo "FAIL: gcloud not installed."; exit 1; }
 have op     || { echo "FAIL: 1Password CLI (op) not installed."; exit 1; }
 have shasum || { echo "FAIL: shasum not found."; exit 1; }
 gcloud auth print-access-token >/dev/null 2>&1 || { echo "FAIL: not authenticated. Run: gcloud auth login"; exit 1; }
-op vault list >/dev/null 2>&1 || { echo "FAIL: 1Password CLI is locked. Unlock the 1Password app and re-run."; exit 1; }
+[ "${CODE_ONLY:-}" = "1" ] || op vault list >/dev/null 2>&1 || { echo "FAIL: 1Password CLI is locked. Unlock the 1Password app and re-run (or CODE_ONLY=1 for a code-only redeploy)."; exit 1; }
 [ -f .env.op ] || { echo "FAIL: .env.op not found."; exit 1; }
 # Restore the operator's default project on exit: other repos' deploys (e.g. the courier) run
 # against their own project and must not inherit this one.
@@ -61,6 +63,16 @@ ref_for(){   # $1 = var name -> its op:// reference from .env.op (fail loud if m
   [ -n "$r" ] || { echo "FAIL: no op:// reference for $1 in .env.op" >&2; exit 1; }
   printf '%s' "$r"
 }
+
+if [ "${CODE_ONLY:-}" = "1" ]; then
+  step "code-only: build + update image"
+  gcloud builds submit --config deploy/cloudbuild.yaml \
+    --substitutions "_IMAGE=$IMAGE,_GIT_SHA=$GIT_SHA" . >/dev/null
+  gcloud run jobs update "$JOB" --region="$REGION" --image="$IMAGE" \
+    --update-env-vars="ZENDESK_JOB_GIT_SHA=$GIT_SHA" >/dev/null
+  echo "   job image -> $GIT_SHA"
+  exit 0
+fi
 
 # ── 1. APIs ──────────────────────────────────────────────────────────────────
 step "1. enable APIs"
