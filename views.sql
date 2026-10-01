@@ -14,6 +14,7 @@
 -- Grain is conversations, not people. No contact details are in any column.
 
 CREATE OR REPLACE VIEW `${DS}.v_questions` AS
+WITH unioned AS (
 WITH bot AS (
   SELECT
     b.*,
@@ -48,7 +49,10 @@ tickets AS (
 SELECT
   'ticket' AS source,
   t.conversation_id, t.channel, t.via_channel, t.created_at, DATE(t.created_at) AS question_date,
-  COALESCE(t.zd_event, b.bot_event_name) AS event,
+  COALESCE(t.zd_event, b.bot_event_name,
+           (SELECT tag FROM UNNEST(t.tags) tag
+            WHERE REGEXP_CONTAINS(tag, r'^ai_(chicago|toronto|kerrville|blenheim|long_beach|new_jersey|austin|toulouse|brighton|chantilly|new_york)$')
+            LIMIT 1)) AS event_raw,
   t.subject, t.status, t.turn_count,
   t.bot_participated OR b.conversation_id IS NOT NULL AS bot_involved,
   t.ended_with_human,
@@ -56,7 +60,9 @@ SELECT
   COALESCE(b.resolution_tier, t.zd_resolution_tier) AS zendesk_resolution_tier,
   b.automated_resolution AS zendesk_automated_resolution,
   b.conversation_status AS bot_status, b.conversation_type AS bot_conversation_type,
-  b.not_understood_messages_count AS bot_not_understood, b.knowledge_fallback_count AS bot_fallbacks,
+  -- knowledge_not_understood_count is the counter that actually fires (~1 in 5 bot chats);
+  -- not_understood_messages_count and knowledge_fallback_count read 0 on every row (30 Sep 2026).
+  b.knowledge_not_understood_count AS bot_not_understood, b.knowledge_fallback_count AS bot_fallbacks,
   b.bot_articles, b.bot_first_timer_signal, b.bot_wants_escalation, b.language AS bot_language,
   t.zd_race_division, t.zd_topic, t.tags, t.satisfaction_score,
   t.reply_time_min, t.first_resolution_time_min, t.full_resolution_time_min,
@@ -71,7 +77,10 @@ SELECT
   'bot_only' AS source,
   b.conversation_id, 'messaging' AS channel, b.channel AS via_channel,
   b.conversation_start_time AS created_at, DATE(b.conversation_start_time) AS question_date,
-  b.bot_event_name AS event,
+  COALESCE(b.bot_event_name,
+           (SELECT a FROM UNNEST(b.bot_articles) a
+            WHERE REGEXP_CONTAINS(LOWER(a), r'chicago|toronto|kerrville|blenheim|long beach|new jersey|austin|toulouse|brighton|chantilly')
+            LIMIT 1)) AS event_raw,   -- else the event named by the article the bot answered from
   CAST(NULL AS STRING) AS subject, CAST(NULL AS STRING) AS status,
   b.visitor_messages_count + b.bot_messages_count AS turn_count,
   TRUE AS bot_involved, FALSE AS ended_with_human,
@@ -79,7 +88,7 @@ SELECT
   CAST(NULL AS STRING) AS unanswered_reason, CAST(NULL AS STRING) AS resolution_path,
   b.resolution_tier AS zendesk_resolution_tier, b.automated_resolution AS zendesk_automated_resolution,
   b.conversation_status AS bot_status, b.conversation_type AS bot_conversation_type,
-  b.not_understood_messages_count, b.knowledge_fallback_count,
+  b.knowledge_not_understood_count, b.knowledge_fallback_count,
   b.bot_articles, b.bot_first_timer_signal, b.bot_wants_escalation, b.language,
   CAST(NULL AS STRING), CAST(NULL AS STRING), CAST([] AS ARRAY<STRING>), CAST(NULL AS STRING),
   CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
@@ -88,6 +97,28 @@ SELECT
 FROM bot b
 WHERE b.channel = 'chat'
   AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.bot_link_key = b.platform_conversation_id)
+)
+-- One event label per event, whichever source named it: Zendesk's form field ("Chicago, IL"),
+-- the bot's session variable ("ai_chicago" / "Chicago") or the bot's ticket tag.
+SELECT
+  * EXCEPT (event_raw),
+  CASE
+    WHEN event_raw IS NULL OR LOWER(event_raw) IN ('x', '') THEN NULL
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'chicago') THEN 'Chicago'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'toronto|ttf|10kto') THEN 'Toronto'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'kerrville') THEN 'Kerrville'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'blenheim') THEN 'Blenheim'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'long.?beach') THEN 'Long Beach'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'new.?jersey') THEN 'New Jersey'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'austin') THEN 'Austin'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'toulouse') THEN 'Toulouse'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'brighton') THEN 'Brighton'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'chantilly') THEN 'Chantilly'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'new.?york') THEN 'New York'
+    WHEN REGEXP_CONTAINS(LOWER(event_raw), r'general|other|not specific') THEN 'General'
+    ELSE event_raw
+  END AS event
+FROM unioned
 ;;
 
 -- v_question_topics — the decision list: per month x channel x topic, how many questions came
