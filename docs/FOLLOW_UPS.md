@@ -150,7 +150,7 @@ Not started; each needs a go from Michael:
    Small Claude spend; check cost before enabling daily.
 3. **Make "Which event can we help you with?" required on the ticket form.** Zendesk config change
    (Paul/Robert decide). Today ~half of all questions carry no event.
-4. **Dashboard in our Streamlit app.** A "Questions" view over `v_questions` / `v_question_topics`:
+4. **✅ DONE 1 Oct 2026 — management dashboard ▸ Athletes ▸ Support questions** (supertri_stage1 `support_board.py`, reads ONLY `zendesk_dash.v_support_questions`). Original note: A "Questions" view over `v_questions` / `v_question_topics`:
    volume by channel and event, answered share, top unanswered topics, the content/ACTIVE/human
    split, first-reply speed trend. Decide WHICH app first: the Zendesk bot dashboard (`app.py` in
    this repo, already reads `zendesk_bot`) or the management dashboard (supertri_stage1, Cloud Run
