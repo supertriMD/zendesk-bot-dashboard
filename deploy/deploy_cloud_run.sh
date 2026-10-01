@@ -109,7 +109,7 @@ done
 # ── 4. build ─────────────────────────────────────────────────────────────────
 step "4. build image (uploads only the .gcloudignore allowlist)"
 gcloud builds submit --config deploy/cloudbuild.yaml \
-  --substitutions "_IMAGE=$IMAGE,_GIT_SHA=$GIT_SHA" --region="$REGION" . >/dev/null
+  --substitutions "_IMAGE=$IMAGE,_GIT_SHA=$GIT_SHA" . >/dev/null   # global build: a --region build was refused (PERMISSION_DENIED) on this project
 echo "   built $IMAGE @ $GIT_SHA"
 
 # ── 5. job ───────────────────────────────────────────────────────────────────
