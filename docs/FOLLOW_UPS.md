@@ -131,3 +131,27 @@ this plan. The bot is **Ultimate, i.e. an AI agents – Advanced agent** (tag `e
   of bot chats that never became a ticket. Manual, contains athlete PII.
 - 30-day dashboard view: 752 conversations, 39% automated resolution; email bot 147 conv / 6% AR,
   messaging bot 59 conv / 64% AR (the totals don't reconcile on that screen; trust the export).
+
+## Potential next steps — Zendesk questions data (Michael, 1 Oct 2026)
+
+Built and live: daily Cloud Run job `zendesk-daily` (06:30 UK) → `ticket_attributes`, `ticket_metrics`,
+`bot_conversations`, views `v_questions` + `v_question_topics`. First scheduled run failed on a
+duplicate row in a growing bot-export file; fixed (`d92071b`, latest row per key) and re-run green.
+Not started; each needs a go from Michael:
+
+1. **Content-gap list for Paul (Space 3, athlete comms/CRM).** From `v_question_topics` + `resolution_path`:
+   the not-fully-answered tickets that new/better help-centre content would fix (511 Jul–Sep: bib
+   pickup, registration, athlete guide, refund, distance change, wave times), the 221 that need an
+   ACTIVE lookup, and the bot-only chats with no article (371) or a not-understood message (~360).
+   Output = a ranked backlog, aggregates only, no athlete details.
+2. **Extend topic scoring to web-form tickets.** 1,142 web-form tickets (Jul–Sep) have no
+   `primary_topic` because `score_conversations.py` only scores bot conversations. Add a topic-only
+   pass for non-bot tickets (and optionally the bot-only chats via `automated_resolution_reasoning`).
+   Small Claude spend; check cost before enabling daily.
+3. **Make "Which event can we help you with?" required on the ticket form.** Zendesk config change
+   (Paul/Robert decide). Today ~half of all questions carry no event.
+4. **Dashboard in our Streamlit app.** A "Questions" view over `v_questions` / `v_question_topics`:
+   volume by channel and event, answered share, top unanswered topics, the content/ACTIVE/human
+   split, first-reply speed trend. Decide WHICH app first: the Zendesk bot dashboard (`app.py` in
+   this repo, already reads `zendesk_bot`) or the management dashboard (supertri_stage1, Cloud Run
+   + IAP, reads `supertri-reg-analytics` — would need cross-project read on `zendesk_bot`).
