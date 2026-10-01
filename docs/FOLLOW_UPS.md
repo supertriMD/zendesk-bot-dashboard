@@ -119,3 +119,15 @@ this plan. The bot is **Ultimate, i.e. an AI agents – Advanced agent** (tag `e
 4. **Owner decisions, not builds:** switch CSAT on (Team supports the legacy survey); make the
    event field required on the form; link requester to athlete by hashed email for a
    repeat-rate test (privacy call, aggregates only).
+
+### AI agents setup, read from the dashboard (30 Sep 2026)
+- Two Advanced AI agents, both active: **TRI** (email) bot id `6a4a9d689f8fdde94e39876f`, and
+  **Tri** (messaging) bot id `6a41cee6fbfda88b1060d653`. The data export is per bot, so the
+  reader must loop over BOTH ids (AI_AGENTS_BOT_ID takes a comma-separated list).
+- Organization id `6a16bc521f475afb692a1abe` (AI agents ▸ Organization management).
+- A "General purpose key" ALREADY EXISTS. It is shown only once and Regenerate invalidates the old
+  one. Not in 1Password; who uses it is unknown (client admins: michael@, cathy.walker@).
+- Conversation logs page has a manual **Export (XLSX)** per bot: the only route found to the TEXT
+  of bot chats that never became a ticket. Manual, contains athlete PII.
+- 30-day dashboard view: 752 conversations, 39% automated resolution; email bot 147 conv / 6% AR,
+  messaging bot 59 conv / 64% AR (the totals don't reconcile on that screen; trust the export).
