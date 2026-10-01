@@ -139,7 +139,7 @@ Built and live: daily Cloud Run job `zendesk-daily` (06:30 UK) → `ticket_attri
 duplicate row in a growing bot-export file; fixed (`d92071b`, latest row per key) and re-run green.
 Not started; each needs a go from Michael:
 
-1. **Content-gap list for Paul (Space 3, athlete comms/CRM).** From `v_question_topics` + `resolution_path`:
+1. **✅ DRAFTED 1 Oct 2026** — `supertri_stage1/spaces/space3_growth/outputs/SUPPORT_CONTENT_GAPS_2026-10_DRAFT.md`, awaiting Paul (key finding: Toulouse, Blenheim, Austin have NO event-specific help-centre articles). Original note: **Content-gap list for Paul (Space 3, athlete comms/CRM).** From `v_question_topics` + `resolution_path`:
    the not-fully-answered tickets that new/better help-centre content would fix (511 Jul–Sep: bib
    pickup, registration, athlete guide, refund, distance change, wave times), the 221 that need an
    ACTIVE lookup, and the bot-only chats with no article (371) or a not-understood message (~360).
