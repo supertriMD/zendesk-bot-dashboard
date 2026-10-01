@@ -15,7 +15,8 @@ Privacy: Zendesk exports no message text. `conversations_data` holds session par
 (bsat_json) plus the list of key names, so we can see what else exists without holding it.
 
 Credentials (from the AI agents dashboard ▸ Organization management): AI_AGENTS_API_KEY,
-AI_AGENTS_BOT_ID, AI_AGENTS_ORG_ID. If none is set the step SKIPS cleanly (exit 0), so the
+AI_AGENTS_BOT_ID, AI_AGENTS_ORG_ID. The export is per bot and we run two (email "TRI" and
+messaging "Tri"), so AI_AGENTS_BOT_ID is a comma-separated list; every bot is pulled each day. If none is set the step SKIPS cleanly (exit 0), so the
 daily job runs before they are configured; if some but not all are set, it fails loud.
 
 Usage:
@@ -154,16 +155,16 @@ class BotExportClient:
         config.require(config.AI_AGENTS_REQUIRED_VARS + [config.ZENDESK_SUBDOMAIN_VAR])
         self.url = (f"https://{os.environ[config.ZENDESK_SUBDOMAIN_VAR]}.zendesk.com"
                     "/ai-agents/api/data-export/v3/get-signed-urls")
+        self.bot_ids = [b.strip() for b in os.environ[config.AI_AGENTS_BOT_ID_VAR].split(",") if b.strip()]
         self.headers = {
             "authorization": f"Bearer {os.environ[config.AI_AGENTS_API_KEY_VAR]}",
-            "botId": os.environ[config.AI_AGENTS_BOT_ID_VAR],
             "organizationId": os.environ[config.AI_AGENTS_ORG_ID_VAR],
             "Content-Type": "application/json",
         }
 
-    def _post(self, day: date) -> dict:
+    def _post(self, day: date, bot_id: str) -> dict:
         for attempt in range(config.ZENDESK_MAX_RETRIES):
-            resp = requests.post(self.url, headers=self.headers,
+            resp = requests.post(self.url, headers={**self.headers, "botId": bot_id},
                                  json={"date": day.isoformat()}, timeout=60)
             if resp.status_code == 429 or resp.status_code >= 500:
                 wait = int(resp.headers.get("Retry-After", 2 ** attempt))
@@ -178,9 +179,15 @@ class BotExportClient:
         raise RuntimeError(f"AI agents export: giving up on {day} after retries")
 
     def records(self, day: date) -> List[dict]:
-        """Every conversation record in that day's export file(s)."""
+        """Every conversation record in that day's export file(s), across all bots."""
         out: List[dict] = []
-        for url in self._post(day).get("urls") or []:
+        for bot_id in self.bot_ids:
+            out.extend(self._records(day, bot_id))
+        return out
+
+    def _records(self, day: date, bot_id: str) -> List[dict]:
+        out: List[dict] = []
+        for url in self._post(day, bot_id).get("urls") or []:
             resp = requests.get(url, timeout=300)   # signed URL: no auth header
             resp.raise_for_status()
             text = resp.text.strip()
