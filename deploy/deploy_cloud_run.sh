@@ -49,6 +49,10 @@ have shasum || { echo "FAIL: shasum not found."; exit 1; }
 gcloud auth print-access-token >/dev/null 2>&1 || { echo "FAIL: not authenticated. Run: gcloud auth login"; exit 1; }
 op vault list >/dev/null 2>&1 || { echo "FAIL: 1Password CLI is locked. Unlock the 1Password app and re-run."; exit 1; }
 [ -f .env.op ] || { echo "FAIL: .env.op not found."; exit 1; }
+# Restore the operator's default project on exit: other repos' deploys (e.g. the courier) run
+# against their own project and must not inherit this one.
+_PREV_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+trap '[ -n "$_PREV_PROJECT" ] && gcloud config set project "$_PREV_PROJECT" >/dev/null 2>&1' EXIT
 gcloud config set project "$PROJECT" >/dev/null
 echo "project=$PROJECT region=$REGION job=$JOB sa=$RUN_SA image-commit=$GIT_SHA"
 
@@ -69,9 +73,14 @@ step "2. Artifact Registry repo '$AR'"
 if gcloud artifacts repositories describe "$AR" --location="$REGION" >/dev/null 2>&1; then
   echo "   exists"
 else
-  gcloud artifacts repositories create "$AR" --repository-format=docker --location="$REGION" \
-    --description="Zendesk daily refresh job images" >/dev/null
-  echo "   created"
+  if out="$(gcloud artifacts repositories create "$AR" --repository-format=docker --location="$REGION" \
+      --description="Zendesk daily refresh job images" 2>&1)"; then
+    echo "   created"
+  elif printf '%s' "$out" | grep -q ALREADY_EXISTS; then
+    echo "   exists (describe was not yet permitted right after enabling the API)"
+  else
+    echo "$out"; exit 1
+  fi
 fi
 
 # ── 3. secrets: 1Password -> Secret Manager (piped, never on disk) ──────────
