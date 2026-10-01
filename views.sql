@@ -173,11 +173,13 @@ SELECT
   our_resolution,
   resolution_path,
   IFNULL(our_resolution, '') != 'no_question' AS is_question,
-  (our_resolution = 'resolved' OR (our_resolution IS NULL AND IFNULL(zendesk_automated_resolution, FALSE))) AS bot_answered,
-  our_resolution IN ('partial', 'unresolved') AS not_fully_answered,
-  bot_involved,
-  ended_with_human,
-  ARRAY_LENGTH(bot_articles) > 0 AS bot_used_article,
+  -- IFNULL on every flag: a NULL resolution would otherwise make the whole flag NULL, not FALSE
+  IFNULL(our_resolution = 'resolved', FALSE)
+    OR (our_resolution IS NULL AND IFNULL(zendesk_automated_resolution, FALSE)) AS bot_answered,
+  IFNULL(our_resolution IN ('partial', 'unresolved'), FALSE) AS not_fully_answered,
+  IFNULL(bot_involved, FALSE) AS bot_involved,
+  IFNULL(ended_with_human, FALSE) AS ended_with_human,
+  IFNULL(ARRAY_LENGTH(bot_articles), 0) > 0 AS bot_used_article,
   IFNULL(bot_not_understood, 0) > 0 AS bot_not_understood,
   IFNULL(bot_first_timer_signal, FALSE) AS first_timer_signal,
   reply_time_min,
